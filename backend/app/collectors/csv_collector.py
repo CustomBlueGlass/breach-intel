@@ -21,6 +21,12 @@ class TabularCollector(BaseCollector):
     file_kind: str = "csv"  # or "xlsx"
 
     async def fetch_raw(self) -> bytes:
+        # FIX: guard against feed_url being NULL in the DB (e.g. HHS OCR portal
+        # whose CSV export URL was not discovered at seed time). Return empty
+        # bytes; parse() below handles the empty case cleanly instead of
+        # crashing with TypeError: Invalid type for url ... got NoneType.
+        if not self.source_row.feed_url:
+            return b""
         resp = await self.client.get(self.source_row.feed_url)
         resp.raise_for_status()
         return resp.content
@@ -41,6 +47,10 @@ class TabularCollector(BaseCollector):
     def map_row(self, row: dict) -> NormalizedRecord | None: ...
 
     async def parse(self, raw: bytes) -> list[NormalizedRecord]:
+        # FIX: return early on empty bytes (e.g. when feed_url is None and
+        # fetch_raw() returned b"") rather than trying to parse an empty CSV.
+        if not raw:
+            return []
         out = []
         for row in self.rows(raw):
             rec = self.map_row(row)
