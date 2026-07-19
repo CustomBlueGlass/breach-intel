@@ -16,6 +16,8 @@ enabling them in production; the collector log will report
 records_fetched=0 until selectors are filled in, rather than silently
 inserting garbage.
 """
+import logging
+
 from app.collectors.html_fallback_collector import HTMLFallbackCollector, ScrapeConfig
 from app.collectors.rss_collector import RSSCollector
 from app.collectors.sources.ca_ag import CaliforniaOAGCollector
@@ -23,6 +25,8 @@ from app.collectors.sources.cisa_kev import CISAKEVCollector
 from app.collectors.sources.hhs_ocr import HHSOCRCollector
 from app.collectors.sources.hibp import HIBPCollector
 from app.collectors.sources.ransomware_live import RansomwareLiveCollector
+
+logger = logging.getLogger("breach_intel.scheduler")
 
 RSS_SLUGS = {
     "hackmanac", "hipaa_journal", "databreaches_net", "bleepingcomputer",
@@ -50,6 +54,13 @@ PLACEHOLDER_HTML_SLUGS = {
 
 ON_DEMAND_ONLY_SLUGS = {"dehashed", "intelx"}  # never scheduled — see sources/dehashed_intelx.py
 
+# Sources that have a csv/json_api feed_type in the seed but don't yet have
+# a dedicated collector implemented. Logged as skipped rather than crashing.
+NOT_YET_IMPLEMENTED_SLUGS = {
+    "mass_ag_reports", "leakix_ransomware", "washington_atg",
+    "sec_edgar_search", "privacyrights_chronology",
+}
+
 GENERIC_PLACEHOLDER_CONFIG = ScrapeConfig(
     row_selector="table tr, .breach-row, article",
     company_selector="td:first-child, .org-name, h2 a",
@@ -64,6 +75,15 @@ def build_collector(source_row, http_client=None):
     if slug in ON_DEMAND_ONLY_SLUGS:
         return None  # handled via enrich_company(), not the scheduler
 
+    if slug in NOT_YET_IMPLEMENTED_SLUGS:
+        # FIX: previously raised ValueError and crashed the collector run.
+        # Now logs a warning and returns None so the scheduler skips it cleanly.
+        logger.warning(
+            "Collector for '%s' (feed_type=%s) not yet implemented — skipping",
+            slug, source_row.feed_type,
+        )
+        return None
+
     if slug in EXPLICIT_COLLECTORS:
         return EXPLICIT_COLLECTORS[slug](source_row, http_client)
 
@@ -73,4 +93,10 @@ def build_collector(source_row, http_client=None):
     if slug in PLACEHOLDER_HTML_SLUGS or source_row.feed_type == "html_scrape":
         return HTMLFallbackCollector(source_row, GENERIC_PLACEHOLDER_CONFIG, http_client)
 
-    raise ValueError(f"No collector wired for source '{slug}' (feed_type={source_row.feed_type})")
+    # FIX: previously raised ValueError and crashed the run for any unrecognised
+    # source. Now logs a warning and returns None so other collectors still run.
+    logger.warning(
+        "No collector wired for source '%s' (feed_type=%s) — skipping",
+        slug, source_row.feed_type,
+    )
+    return None
