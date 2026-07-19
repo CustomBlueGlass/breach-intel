@@ -30,13 +30,18 @@ class IngestOutcome:
     breach_id: str | None = None
 
 
+# FIX: Previously used PostgreSQL's :: cast operator (:incident_date::date)
+# which conflicts with SQLAlchemy's named-parameter syntax (:incident_date).
+# SQLAlchemy tries to parse "incident_date::date" as the parameter name,
+# generating invalid SQL and a PostgresSyntaxError at runtime.
+# Fix: use CAST(:param AS date) instead of :param::date throughout.
 CANDIDATE_QUERY = text(
     """
     SELECT id, canonical_name, industry, region_state, ransomware_group, incident_date
     FROM breaches
     WHERE incident_date IS NULL
-       OR incident_date BETWEEN (:incident_date::date - INTERVAL '45 days')
-                             AND (:incident_date::date + INTERVAL '45 days')
+       OR incident_date BETWEEN (CAST(:incident_date AS date) - INTERVAL '45 days')
+                             AND (CAST(:incident_date AS date) + INTERVAL '45 days')
        OR :incident_date IS NULL
     ORDER BY similarity(canonical_name, :name_norm) DESC
     LIMIT 8
@@ -196,7 +201,7 @@ async def queue_for_review(
 
 
 async def ingest_record(session: AsyncSession, source_id: str, record) -> IngestOutcome:
-    # 1. normalize fully (collectors do a first pass; this is the authoritative pass)
+    # 1. normalize fully
     record.company_name_norm = normalize_company_name(record.company_name_raw)
     record.industry = normalize_industry(record.industry)
     record.ransomware_group_norm = normalize_ransomware_group(record.ransomware_group_raw)
@@ -210,9 +215,8 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
         return IngestOutcome(inserted=False, deduped=True, action="deduped")
 
     # 3. insert the raw/normalized source record
-    # FIX: raw_payload must be serialized to a JSON string before passing to
-    # asyncpg — passing a plain Python dict causes a DataError because asyncpg's
-    # JSONB encoder expects a pre-encoded string, not a dict object.
+    # raw_payload must be JSON-serialized — asyncpg cannot encode a raw Python
+    # dict as JSONB; it expects a pre-serialized string.
     inserted = await session.execute(
         text(
             """
@@ -248,7 +252,6 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
             "url": record.source_record_url,
             "doc_type": record.document_type,
             "fingerprint": fingerprint,
-            # json.dumps() is required — asyncpg cannot encode a raw dict as JSONB
             "raw_payload": json.dumps(record.raw_payload, default=str),
         },
     )
