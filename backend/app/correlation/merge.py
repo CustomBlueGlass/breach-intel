@@ -7,6 +7,7 @@ orphaned source record.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -189,7 +190,7 @@ async def queue_for_review(
             "rid": source_record_id,
             "bid": match.breach_id,
             "conf": match.confidence,
-            "reasons": match.reasons,
+            "reasons": json.dumps(match.reasons),
         },
     )
 
@@ -209,6 +210,9 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
         return IngestOutcome(inserted=False, deduped=True, action="deduped")
 
     # 3. insert the raw/normalized source record
+    # FIX: raw_payload must be serialized to a JSON string before passing to
+    # asyncpg — passing a plain Python dict causes a DataError because asyncpg's
+    # JSONB encoder expects a pre-encoded string, not a dict object.
     inserted = await session.execute(
         text(
             """
@@ -244,7 +248,8 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
             "url": record.source_record_url,
             "doc_type": record.document_type,
             "fingerprint": fingerprint,
-            "raw_payload": record.raw_payload,
+            # json.dumps() is required — asyncpg cannot encode a raw dict as JSONB
+            "raw_payload": json.dumps(record.raw_payload, default=str),
         },
     )
     source_record_id = str(inserted.first().id)
