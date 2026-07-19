@@ -73,10 +73,12 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) l ON TRUE;
 
--- Refresh helper (called by the app after each ingestion batch completes)
+-- Refresh helper (called by the app after each ingestion batch completes).
+-- Plain REFRESH (not CONCURRENTLY): CONCURRENTLY is disallowed inside a
+-- function's transaction context.
 CREATE OR REPLACE FUNCTION refresh_breach_views() RETURNS void AS $$
 BEGIN
-    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_breach_ledger;
+    REFRESH MATERIALIZED VIEW mv_breach_ledger;
     REFRESH MATERIALIZED VIEW mv_breach_trends;
     REFRESH MATERIALIZED VIEW mv_top_ransomware_groups;
     REFRESH MATERIALIZED VIEW mv_source_health;

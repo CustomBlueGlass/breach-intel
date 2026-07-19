@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
-  ShieldAlert, X, Inbox, ListChecks, CheckCircle2, XCircle, Lock,
+  ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
+  FileText, ExternalLink,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -10,7 +11,7 @@ import {
 import {
   COLORS, FONT_DISPLAY, FONT_BODY, FONT_MONO,
   INDUSTRY_LABELS, SOURCE_CATEGORY_META, SEVERITY_META,
-  fmtNumber, fmtDate, relativeTime,
+  fmtNumber, fmtDate, fmtDateTime, relativeTime,
 } from './constants';
 
 /* ------------------------- small shared atoms ------------------------- */
@@ -31,8 +32,8 @@ export function SeverityTag({ severity }) {
   return <Tag style={{ color: m.text, backgroundColor: m.bg }}>{m.label}</Tag>;
 }
 
-export function SourceCategoryChip({ category, docType, dateStr, confidence, isLast }) {
-  const meta = SOURCE_CATEGORY_META[category] || { label: category, Icon: FileText };
+export function SourceCategoryChip({ category, sourceName, docType, dateStr, confidence, url, isLast }) {
+  const meta = SOURCE_CATEGORY_META[category] || { label: category || 'Source', Icon: FileText };
   const Icon = meta.Icon;
   return (
     <div
@@ -51,21 +52,36 @@ export function SourceCategoryChip({ category, docType, dateStr, confidence, isL
       <div className="flex-1 pt-0.5">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-medium" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>
-            {meta.label}
+            {sourceName || meta.label}
           </span>
-          <span
-            className="text-xs px-1.5 py-0.5 rounded"
-            style={{
-              fontFamily: FONT_MONO, color: confidence >= 0.9 ? COLORS.teal : COLORS.boneDim,
-              backgroundColor: COLORS.ink, border: `1px solid ${COLORS.lineFaint}`,
-            }}
-          >
-            {Math.round(confidence * 100)}%
-          </span>
+          {confidence != null && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded"
+              style={{
+                fontFamily: FONT_MONO, color: confidence >= 0.9 ? COLORS.teal : COLORS.boneDim,
+                backgroundColor: COLORS.ink, border: `1px solid ${COLORS.lineFaint}`,
+              }}
+            >
+              {Math.round(confidence * 100)}%
+            </span>
+          )}
         </div>
         <div className="text-xs mt-0.5" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>
-          {docType.replace(/_/g, ' ')} · {fmtDate(dateStr)}
+          {meta.label} · {(docType || '').replace(/_/g, ' ')} · {fmtDateTime(dateStr)}
         </div>
+        {url && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs mt-1 break-all hover:underline"
+            style={{ color: COLORS.amberSoft, fontFamily: FONT_MONO }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink size={11} className="shrink-0" />
+            {url.replace(/^https?:\/\//, '')}
+          </a>
+        )}
       </div>
     </div>
   );
@@ -292,7 +308,10 @@ export function LedgerRow({ b, onOpen }) {
           {b.canonical_name}
         </div>
         <div style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>
-          {INDUSTRY_LABELS[b.industry] || b.industry} · {b.region_state}, {b.country}
+          {[
+            INDUSTRY_LABELS[b.industry] || b.industry,
+            [b.region_state, b.country].filter(Boolean).join(', '),
+          ].filter(Boolean).join(' · ') || '—'}
         </div>
       </td>
       <td className="px-4 py-3 text-sm" style={{ color: b.ransomware_group ? COLORS.bone : COLORS.boneFaint, fontFamily: FONT_BODY }}>
@@ -438,7 +457,11 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading }) {
 
         <div className="flex flex-wrap gap-2 px-6 py-4" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
           <SeverityTag severity={breach.severity} />
-          <Tag style={{ color: COLORS.bone, backgroundColor: COLORS.panelAlt }}>{INDUSTRY_LABELS[breach.industry]}</Tag>
+          {breach.industry && (
+            <Tag style={{ color: COLORS.bone, backgroundColor: COLORS.panelAlt }}>
+              {INDUSTRY_LABELS[breach.industry] || breach.industry}
+            </Tag>
+          )}
           {breach.ransomware_group && (
             <Tag style={{ color: COLORS.red, backgroundColor: 'rgba(192,71,58,0.12)' }}>{breach.ransomware_group}</Tag>
           )}
@@ -450,11 +473,12 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading }) {
         <div className="grid grid-cols-2 gap-4 px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
           {[
             ['Incident date', fmtDate(breach.incident_date)],
-            ['Disclosed', fmtDate(breach.disclosed_date)],
+            ['Publicly disclosed', fmtDate(breach.disclosed_date)],
+            ['Threat actor', breach.ransomware_group || 'Unattributed'],
             ['Records affected (est.)', fmtNumber(breach.records_affected_est)],
-            ['Location', `${breach.region_state}, ${breach.country}`],
+            ['Location', [breach.region_state, breach.country].filter(Boolean).join(', ') || '—'],
             ['Correlated sources', breach.source_count],
-            ['Avg. match confidence', `${Math.round(breach.confidence_avg * 100)}%`],
+            ['Avg. match confidence', breach.confidence_avg != null ? `${Math.round(breach.confidence_avg * 100)}%` : '—'],
           ].map(([label, val]) => (
             <div key={label}>
               <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>{label}</div>
@@ -463,20 +487,38 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading }) {
           ))}
         </div>
 
+        {breach.summary && (
+          <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <div className="text-xs uppercase tracking-widest mb-2" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+              Incident summary
+            </div>
+            <p className="text-sm leading-relaxed" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+              {breach.summary}
+            </p>
+          </div>
+        )}
+
         <div className="px-6 py-5">
           <div className="flex items-center gap-2 mb-4">
             <ListChecks size={14} color={COLORS.boneFaint} />
             <span className="text-xs uppercase tracking-widest" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
-              Evidence log
+              Evidence log — sources &amp; coverage
             </span>
           </div>
-          {breach.linked_sources.map((s, i) => (
+          {(breach.linked_sources || []).length === 0 && (
+            <p className="text-sm" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
+              No source records linked yet.
+            </p>
+          )}
+          {(breach.linked_sources || []).map((s, i) => (
             <SourceCategoryChip
               key={i}
               category={s.source_category}
+              sourceName={s.source_name}
               docType={s.document_type}
               dateStr={s.published_at}
               confidence={s.confidence}
+              url={s.url}
               isLast={i === breach.linked_sources.length - 1}
             />
           ))}
@@ -646,7 +688,7 @@ export function Footer() {
           })}
         </div>
         <span className="text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}>
-          Last sync 14m ago · next run in 5h 46m
+          Sources re-ingested every 6 hours
         </span>
       </div>
     </footer>

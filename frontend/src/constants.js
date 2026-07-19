@@ -74,16 +74,34 @@ export function fmtNumber(n) {
   return String(n);
 }
 
+// Accepts both date-only strings ("2026-07-18") and full timestamps
+// ("2026-07-18T14:23:00+00:00") — appending T00:00:00 to a timestamp
+// used to produce Invalid Date in the evidence log.
+function toDate(d) {
+  if (!d) return null;
+  const dt = new Date(String(d).includes('T') ? d : d + 'T00:00:00');
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 export function fmtDate(d) {
-  if (!d) return '—';
-  const dt = new Date(d + 'T00:00:00');
+  const dt = toDate(d);
+  if (!dt) return '—';
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+export function fmtDateTime(d) {
+  const dt = toDate(d);
+  if (!dt) return '—';
+  const hasTime = String(d).includes('T');
+  const date = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (!hasTime) return date;
+  return `${date}, ${dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 export function daysAgo(d) {
-  if (!d) return null;
-  const diff = Math.round((new Date() - new Date(d + 'T00:00:00')) / 86400000);
-  return diff;
+  const dt = toDate(d);
+  if (!dt) return null;
+  return Math.round((new Date() - dt) / 86400000);
 }
 
 export function relativeTime(d) {

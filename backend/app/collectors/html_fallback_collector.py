@@ -66,7 +66,10 @@ class HTMLFallbackCollector(BaseCollector):
         self.skipped_disallowed = False
 
         pages = []
-        for page_num in range(1, self.cfg.max_pages + 1):
+        # Without a pagination_param every "page" is the same URL — fetch once
+        # instead of re-downloading the identical page max_pages times.
+        page_count = self.cfg.max_pages if self.cfg.pagination_param else 1
+        for page_num in range(1, page_count + 1):
             url = base_url
             if self.cfg.pagination_param and page_num > 1:
                 sep = "&" if "?" in base_url else "?"

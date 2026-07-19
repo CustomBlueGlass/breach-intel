@@ -12,10 +12,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from types import SimpleNamespace
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.correlation.matcher import MatchResult, best_match, classify
+from app.config import settings
+from app.correlation.matcher import MatchResult, best_match, classify, score_candidate
 from app.normalize.company_name import normalize_company_name
 from app.normalize.industry_map import normalize_industry
 from app.normalize.location_normalize import normalize_location
@@ -26,8 +29,24 @@ from app.normalize.ransomware_group_aliases import normalize_ransomware_group
 class IngestOutcome:
     inserted: bool
     deduped: bool
-    action: str  # 'auto_merge' | 'queue_for_review' | 'new_breach' | 'deduped'
+    action: str  # 'auto_merge' | 'queue_for_review' | 'new_breach' | 'stored_unlinked' | 'deduped'
     breach_id: str | None = None
+
+
+# Only documents that positively identify a victim organization may create a
+# new breach (and company) row. News articles and government advisories are
+# kept as source records for the evidence log on an existing breach — they
+# enrich dossiers via auto-merge/review-queue but never mint new companies,
+# because their "company name" is guessed from a headline. This is what keeps
+# the ledger a list of breached companies rather than a news feed.
+BREACH_CREATING_DOC_TYPES = {
+    "leak_site_post",
+    "ag_notification_letter",
+    "hhs_breach_report",
+    "sec_filing",
+    "lookup_summary",
+    "regulatory_action",
+}
 
 
 # FIX: Previously used PostgreSQL's :: cast operator (:incident_date::date)
@@ -42,7 +61,7 @@ CANDIDATE_QUERY = text(
     WHERE incident_date IS NULL
        OR incident_date BETWEEN (CAST(:incident_date AS date) - INTERVAL '45 days')
                              AND (CAST(:incident_date AS date) + INTERVAL '45 days')
-       OR :incident_date IS NULL
+       OR CAST(:incident_date AS date) IS NULL
     ORDER BY similarity(canonical_name, :name_norm) DESC
     LIMIT 8
     """
@@ -71,28 +90,9 @@ async def is_duplicate(session: AsyncSession, source_id: str, fingerprint: str) 
 
 
 async def upsert_company(session: AsyncSession, breach_row) -> str:
-    row = await session.execute(
-        text(
-            """
-            INSERT INTO breach_companies (canonical_name, industry, country, region_state,
-                                           breach_count, first_breach_at, last_breach_at)
-            VALUES (:name, :industry, :country, :region, 1, :date, :date)
-            ON CONFLICT DO NOTHING
-            RETURNING id
-            """
-        ),
-        {
-            "name": breach_row["canonical_name"],
-            "industry": breach_row["industry"],
-            "country": breach_row.get("country"),
-            "region": breach_row["region_state"],
-            "date": breach_row["incident_date"],
-        },
-    )
-    existing = row.first()
-    if existing:
-        return str(existing.id)
-
+    # Look up first, then insert. breach_companies has no unique constraint on
+    # canonical_name, so INSERT ... ON CONFLICT DO NOTHING never conflicts and
+    # every breach used to mint a duplicate company row.
     found = await session.execute(
         text(
             "SELECT id FROM breach_companies WHERE canonical_name = :name "
@@ -107,6 +107,7 @@ async def upsert_company(session: AsyncSession, breach_row) -> str:
                 """
                 UPDATE breach_companies
                 SET breach_count = breach_count + 1,
+                    first_breach_at = LEAST(coalesce(first_breach_at, :date), :date),
                     last_breach_at = GREATEST(coalesce(last_breach_at, :date), :date)
                 WHERE id = :id
                 """
@@ -114,7 +115,25 @@ async def upsert_company(session: AsyncSession, breach_row) -> str:
             {"id": found_row.id, "date": breach_row["incident_date"]},
         )
         return str(found_row.id)
-    raise RuntimeError("company upsert failed unexpectedly")
+
+    row = await session.execute(
+        text(
+            """
+            INSERT INTO breach_companies (canonical_name, industry, country, region_state,
+                                           breach_count, first_breach_at, last_breach_at)
+            VALUES (:name, :industry, :country, :region, 1, :date, :date)
+            RETURNING id
+            """
+        ),
+        {
+            "name": breach_row["canonical_name"],
+            "industry": breach_row["industry"],
+            "country": breach_row.get("country"),
+            "region": breach_row["region_state"],
+            "date": breach_row["incident_date"],
+        },
+    )
+    return str(row.first().id)
 
 
 async def create_new_breach(session: AsyncSession, record) -> str:
@@ -136,7 +155,7 @@ async def create_new_breach(session: AsyncSession, record) -> str:
                                    records_affected_est, data_types_exposed, source_count,
                                    confidence_avg, summary)
             VALUES (:company_id, :name, :industry, :country, :region, :group, :inc_date,
-                    :disc_date, :records, :data_types, 1, 1.0, :summary)
+                    :disc_date, :records, :data_types, 0, 1.0, :summary)
             RETURNING id
             """
         ),
@@ -198,6 +217,61 @@ async def queue_for_review(
             "reasons": json.dumps(match.reasons),
         },
     )
+
+
+# Unlinked news/advisory records that plausibly describe the same incident as
+# a just-created breach. Kept tight (trigram similarity + date window) — the
+# real scoring happens in score_candidate below.
+ATTACH_UNLINKED_QUERY = text(
+    """
+    SELECT id, company_name_norm, incident_date, industry, region_state, ransomware_group_norm
+    FROM breach_source_records
+    WHERE matched_breach_id IS NULL
+      AND similarity(company_name_norm, :name_norm) > 0.4
+      AND (incident_date IS NULL OR CAST(:incident_date AS date) IS NULL
+           OR incident_date BETWEEN (CAST(:incident_date AS date) - INTERVAL '45 days')
+                                AND (CAST(:incident_date AS date) + INTERVAL '45 days'))
+    LIMIT 25
+    """
+)
+
+
+async def attach_unlinked_records(session: AsyncSession, breach_id: str, record) -> int:
+    """
+    News records arrive before regulators confirm a breach. When an
+    authoritative report finally creates the breach row, sweep up earlier
+    unlinked news/advisory records that clearly describe the same incident.
+    """
+    rows = (
+        await session.execute(
+            ATTACH_UNLINKED_QUERY,
+            {"name_norm": record.company_name_norm, "incident_date": record.incident_date},
+        )
+    ).fetchall()
+    breach_as_candidate = SimpleNamespace(
+        id=breach_id,
+        canonical_name=record.company_name_norm,
+        industry=record.industry,
+        region_state=record.region_state,
+        ransomware_group=record.ransomware_group_norm,
+        incident_date=record.incident_date,
+    )
+    attached = 0
+    for row in rows:
+        match = score_candidate(row, breach_as_candidate)
+        # News/advisory records rarely carry industry/location metadata, so
+        # their blended score tops out around 0.75 even on an exact company
+        # name — treat a near-exact name inside the date window as a link,
+        # and send the merely-plausible ones to the human review queue.
+        strong_name = match.reasons.get("name_score", 0.0) >= 0.95
+        if match.confidence >= settings.auto_merge_confidence_threshold or (
+            strong_name and match.confidence >= settings.queue_confidence_threshold
+        ):
+            await link_record_to_breach(session, str(row.id), breach_id, match.confidence)
+            attached += 1
+        elif match.confidence >= settings.queue_confidence_threshold:
+            await queue_for_review(session, str(row.id), match)
+    return attached
 
 
 async def ingest_record(session: AsyncSession, source_id: str, record) -> IngestOutcome:
@@ -262,6 +336,19 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
     match = best_match(record, candidates)
     action = classify(match)
 
+    # News/advisory records carry too little metadata to reach the blended
+    # auto-merge threshold even on an exact company-name match — promote a
+    # near-exact name inside the candidate date window to a merge instead of
+    # burying obvious coverage in the review queue. Authoritative documents
+    # keep the strict threshold: two similarly-named companies must not merge
+    # on name alone.
+    if (
+        action == "queue_for_review"
+        and record.document_type not in BREACH_CREATING_DOC_TYPES
+        and match.reasons.get("name_score", 0.0) >= 0.95
+    ):
+        action = "auto_merge"
+
     if action == "auto_merge":
         await link_record_to_breach(session, source_record_id, match.breach_id, match.confidence)
         return IngestOutcome(True, False, action, match.breach_id)
@@ -270,7 +357,13 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
         await queue_for_review(session, source_record_id, match)
         return IngestOutcome(True, False, action)
 
-    # 5. no good candidate -> this is a new, distinct breach
+    # 5. no good candidate. Authoritative documents create a new, distinct
+    # breach; news/advisory documents stay stored as unlinked source records
+    # so a later authoritative report can pick them up during correlation.
+    if record.document_type not in BREACH_CREATING_DOC_TYPES:
+        return IngestOutcome(True, False, "stored_unlinked")
+
     new_breach_id = await create_new_breach(session, record)
     await link_record_to_breach(session, source_record_id, new_breach_id, 1.0)
+    await attach_unlinked_records(session, new_breach_id, record)
     return IngestOutcome(True, False, "new_breach", new_breach_id)

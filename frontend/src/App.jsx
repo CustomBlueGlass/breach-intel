@@ -135,7 +135,7 @@ export default function App() {
           <div className="px-6 pt-6 flex items-center gap-6">
             <div>
               <div style={{ fontFamily: 'monospace', color: COLORS.bone, fontSize: 20 }}>
-                {stats ? Math.round(Number(stats.avg_confidence) * 100) + '%' : '—'}
+                {stats?.avg_confidence != null ? Math.round(Number(stats.avg_confidence) * 100) + '%' : '—'}
               </div>
               <div className="text-xs" style={{ color: COLORS.boneFaint }}>avg. correlation confidence</div>
             </div>
