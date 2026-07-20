@@ -89,6 +89,56 @@ BEGIN
 END $$
 """
 
+# Tables the public site reads directly (breach detail panel, match queue).
+# The original supabase_grants.sql aborted partway on some databases (grant
+# before create), which left RLS policies and grants missing — the ledger
+# views still worked but the detail panel's base-table queries returned
+# nothing. Re-assert the full read-only setup idempotently on every run.
+PUBLIC_READ_TABLES = [
+    "breaches", "breach_companies", "breach_source_records",
+    "breach_match_queue", "breach_data_sources", "breach_collector_log",
+    "threat_actors",
+]
+PUBLIC_READ_VIEWS = [
+    "mv_breach_ledger", "mv_breach_trends", "mv_top_ransomware_groups",
+    "mv_source_health", "mv_platform_stats",
+]
+
+ENSURE_PUBLIC_READ = """
+DO $$
+DECLARE
+    tbl text;
+    rel text;
+BEGIN
+    FOREACH tbl IN ARRAY ARRAY[{tables}]
+    LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'public' AND tablename = tbl AND policyname = 'public read'
+        ) THEN
+            EXECUTE format('CREATE POLICY "public read" ON %I FOR SELECT USING (true)', tbl);
+        END IF;
+    END LOOP;
+
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        FOREACH rel IN ARRAY ARRAY[{relations}]
+        LOOP
+            EXECUTE format('GRANT SELECT ON %I TO anon', rel);
+        END LOOP;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        FOREACH rel IN ARRAY ARRAY[{relations}]
+        LOOP
+            EXECUTE format('GRANT SELECT ON %I TO authenticated', rel);
+        END LOOP;
+    END IF;
+END $$
+""".format(
+    tables=", ".join(f"'{t}'" for t in PUBLIC_READ_TABLES),
+    relations=", ".join(f"'{r}'" for r in PUBLIC_READ_TABLES + PUBLIC_READ_VIEWS),
+)
+
 
 async def fix_sources(session) -> None:
     for slug, url in URL_FIXES.items():
@@ -270,6 +320,7 @@ async def ensure_views(session) -> None:
     await session.execute(text(PLATFORM_STATS_VIEW))
     await session.execute(text(REFRESH_FUNCTION))
     await session.execute(text(GRANT_STATS_VIEW))
+    await session.execute(text(ENSURE_PUBLIC_READ))
 
 
 async def run_maintenance() -> None:

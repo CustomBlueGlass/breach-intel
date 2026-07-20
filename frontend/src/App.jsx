@@ -32,6 +32,7 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(null);
 
   const [trends, setTrends] = useState([]);
   const [topGroups, setTopGroups] = useState([]);
@@ -78,9 +79,13 @@ export default function App() {
     setDrawerOpen(true);
     setDetailLoading(true);
     setDetail(null);
+    setDetailError(null);
     fetchBreachDetail(b.id)
       .then(({ breach, linked_sources }) => setDetail({ ...breach, linked_sources }))
-      .catch((e) => console.error('fetchBreachDetail', e))
+      .catch((e) => {
+        console.error('fetchBreachDetail', e);
+        setDetailError(e?.message || String(e));
+      })
       .finally(() => setDetailLoading(false));
   }
 
@@ -157,6 +162,7 @@ export default function App() {
         breach={detail}
         isOpen={drawerOpen}
         loading={detailLoading}
+        error={detailError}
         onClose={() => setDrawerOpen(false)}
       />
     </div>
