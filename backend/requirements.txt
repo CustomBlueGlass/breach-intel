@@ -1,4 +1,8 @@
-fastapi==0.115.0
+fastapi==0.133.1
+# Pinned explicitly (transitive via fastapi) to clear GHSA/CVE-2026-48710 +
+# AIKIDO-2026-10923: Host-header validation bypass in request.url. fastapi
+# 0.133.1 is the first release whose starlette range admits 1.x.
+starlette==1.0.1
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 asyncpg==0.29.0
