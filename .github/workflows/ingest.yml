@@ -11,6 +11,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # This job only reads the repo (no pushes), so don't leave the
+          # GITHUB_TOKEN persisted in .git/config where a later compromised
+          # step could reuse it.
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
