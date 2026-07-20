@@ -32,7 +32,15 @@ jobs:
               "Accept": "text/html,application/xhtml+xml",
           }
           r = httpx.get(url, headers=headers, follow_redirects=True, timeout=30)
-          print(f"status={r.status_code} final_url={r.url} bytes={len(r.text)}")
+          print(f"status={r.status_code} final_url={r.url} bytes={len(r.text)} content_type={r.headers.get('content-type')}")
+
+          # JSON APIs: pretty-print the head of the payload and stop.
+          if "json" in (r.headers.get("content-type") or ""):
+              import json
+              payload = r.json()
+              print(json.dumps(payload, indent=2)[:6000])
+              raise SystemExit(0)
+
           soup = BeautifulSoup(r.text, "lxml")
 
           for i, table in enumerate(soup.select("table")):
