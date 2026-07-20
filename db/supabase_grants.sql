@@ -32,16 +32,13 @@ CREATE POLICY "public read" ON breach_data_sources FOR SELECT USING (true);
 CREATE POLICY "public read" ON breach_collector_log FOR SELECT USING (true);
 CREATE POLICY "public read" ON threat_actors FOR SELECT USING (true);
 
-GRANT SELECT ON mv_breach_ledger TO anon, authenticated;
-GRANT SELECT ON mv_breach_trends TO anon, authenticated;
-GRANT SELECT ON mv_top_ransomware_groups TO anon, authenticated;
-GRANT SELECT ON mv_source_health TO anon, authenticated;
-GRANT SELECT ON mv_platform_stats TO anon, authenticated;
-
 -- A tiny single-row view powering the hero stats strip (total breaches,
 -- total sources, avg. correlation confidence) without pulling full tables
 -- into the browser to compute an average client-side.
-CREATE MATERIALIZED VIEW mv_platform_stats AS
+-- NOTE: created BEFORE it is granted below — the previous version of this
+-- script granted first and aborted with "relation does not exist", which
+-- left mv_platform_stats missing and the hero stats erroring in the console.
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_platform_stats AS
 SELECT
     (SELECT count(*) FROM breaches) AS total_breaches,
     (SELECT count(*) FROM breach_data_sources WHERE enabled) AS total_sources,
@@ -49,10 +46,18 @@ SELECT
     (SELECT count(*) FROM breach_match_queue WHERE status = 'pending') AS pending_review,
     now() AS computed_at;
 
--- Re-run after adding mv_platform_stats above so it's included going forward:
+GRANT SELECT ON mv_breach_ledger TO anon, authenticated;
+GRANT SELECT ON mv_breach_trends TO anon, authenticated;
+GRANT SELECT ON mv_top_ransomware_groups TO anon, authenticated;
+GRANT SELECT ON mv_source_health TO anon, authenticated;
+GRANT SELECT ON mv_platform_stats TO anon, authenticated;
+
+-- Re-run after adding mv_platform_stats above so it's included going forward.
+-- Plain REFRESH (not CONCURRENTLY): CONCURRENTLY is disallowed inside a
+-- function's transaction context.
 CREATE OR REPLACE FUNCTION refresh_breach_views() RETURNS void AS $$
 BEGIN
-    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_breach_ledger;
+    REFRESH MATERIALIZED VIEW mv_breach_ledger;
     REFRESH MATERIALIZED VIEW mv_breach_trends;
     REFRESH MATERIALIZED VIEW mv_top_ransomware_groups;
     REFRESH MATERIALIZED VIEW mv_source_health;

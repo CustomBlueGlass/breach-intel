@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from rapidfuzz import fuzz
 
 from app.config import settings
+from app.normalize.company_name import normalize_company_name
 from app.normalize.date_parser import days_between
 
 DATE_WINDOW_DAYS = 45  # candidates outside this window aren't considered
@@ -35,8 +36,13 @@ class MatchResult:
 
 
 def score_candidate(record, candidate) -> MatchResult:
+    # Normalize the candidate's canonical_name before comparing — it stores
+    # the display name ("Initech Software Inc."), and comparing that raw form
+    # against the record's normalized name depressed every name score by the
+    # casing/legal-suffix difference.
     name_score = fuzz.token_sort_ratio(
-        record.company_name_norm or "", candidate.canonical_name or ""
+        record.company_name_norm or "",
+        normalize_company_name(candidate.canonical_name or ""),
     ) / 100.0
 
     delta_days = days_between(record.incident_date, candidate.incident_date)

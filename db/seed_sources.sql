@@ -21,7 +21,7 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 ('mass_ag_breaches',    'Mass.gov — Data Breaches',  'https://www.mass.gov/data-breaches', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
 ('california_oag',      'California OAG — Data Breach List', 'https://oag.ca.gov/privacy/databreach/list', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', 'Sortable HTML table, paginated server-side'),
 ('vermont_ag',          'Vermont AG — Security Breach Notices', 'https://ago.vermont.gov/focus-areas/data-privacy/security-breach-notices', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
-('oregon_doj',          'Oregon DOJ — Data Breach Notifications', 'https://doj.state.or.us/consumer-protection/data-breach-notifications', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
+('oregon_doj',          'Oregon DOJ — Data Breach Notifications', 'https://justice.oregon.gov/consumer/DataBreach/', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
 ('washington_atg',      'Washington AG — Data Breach Notifications', 'https://www.atg.wa.gov/data-breach-notifications', 'state_ag_notification', 'csv', NULL, FALSE, 'scheduled', 'WA publishes an annual breach report CSV/PDF dataset'),
 ('indiana_ag',          'Indiana AG — Data Breach Notifications', 'https://www.in.gov/attorneygeneral/consumer-protection-division/id-theft-prevention/data-breach-notifications', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
 ('montana_doj',         'Montana DOJ — Consumer Data Breach Notices', 'https://dojmt.gov/consumer/data-breach-notices', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
@@ -32,7 +32,7 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 ('hhs_ocr_breach_portal', 'HHS OCR Breach Portal',  'https://ocrportal.hhs.gov/ocr/breach/breach_report.jsf', 'federal_regulatory', 'csv', NULL, FALSE, 'scheduled', 'Portal exposes a CSV export of the breach report'),
 ('hipaa_journal',         'HIPAA Journal — Breach News', 'https://www.hipaajournal.com/category/data-breach-news', 'security_news', 'rss', 'https://www.hipaajournal.com/category/data-breach-news/feed/', FALSE, 'scheduled', NULL),
 ('sec_edgar_search',      'SEC EDGAR Full-Text Search', 'https://www.sec.gov/edgar/search', 'sec_filing', 'json_api', 'https://efts.sec.gov/LATEST/search-index?q=%22cybersecurity+incident%22&forms=8-K', FALSE, 'scheduled', 'EDGAR full-text search has a documented JSON API; filter on Item 1.05 8-Ks'),
-('sec_cyber_disclosures', 'SEC — Cybersecurity Disclosures', 'https://www.sec.gov/corpfin/cybersecurity-disclosures', 'sec_filing', 'html_scrape', NULL, FALSE, 'scheduled', 'Guidance/index page; links resolved and crawled individually'),
+('sec_cyber_disclosures', 'SEC — Cybersecurity Disclosures', 'https://www.sec.gov/securities-topics/cybersecurity', 'sec_filing', 'html_scrape', NULL, FALSE, 'scheduled', 'Guidance/index page; links resolved and crawled individually'),
 
 -- Security journalism / aggregators
 ('databreaches_net',  'DataBreaches.net',          'https://databreaches.net',           'security_news', 'rss', 'https://databreaches.net/feed/', FALSE, 'scheduled', NULL),
@@ -64,3 +64,24 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 ('ncsc_uk',            'NCSC UK',                     'https://www.ncsc.gov.uk',             'eu_uk_regulatory', 'rss', 'https://www.ncsc.gov.uk/api/1/services/news-rss-feed.xml', FALSE, 'scheduled', NULL),
 ('edpb',               'European Data Protection Board', 'https://edpb.europa.eu',           'eu_uk_regulatory', 'html_scrape', NULL, FALSE, 'scheduled', NULL)
 ;
+
+-- ============================================================================
+-- Sources that cannot run yet ship disabled, so a fresh deployment starts
+-- with clean collector logs. backend/app/maintenance.py applies the same
+-- updates to an already-seeded database.
+--   * html_scrape sources (except california_oag) need a hand-tuned
+--     ScrapeConfig before enabling — generic selectors scrape garbage.
+--   * csv/json_api sources listed under NOT_YET_IMPLEMENTED_SLUGS in
+--     backend/app/collectors/registry.py have no collector yet.
+--   * bleepingcomputer's CDN returns 403 to datacenter IPs.
+--   * cisa_kev is a vulnerability catalog, not breach data.
+-- ============================================================================
+UPDATE breach_data_sources SET enabled = FALSE WHERE slug IN (
+    'ransom_db', 'maine_ag', 'mass_ag_breaches', 'vermont_ag', 'oregon_doj',
+    'indiana_ag', 'montana_doj', 'delaware_ag', 'north_dakota_ag',
+    'idtheftcenter', 'privacyrights_breaches', 'enforcementtracker',
+    'ic3', 'ico_enforcement', 'edpb', 'sec_cyber_disclosures',
+    'mass_ag_reports', 'leakix_ransomware', 'washington_atg',
+    'sec_edgar_search', 'privacyrights_chronology',
+    'bleepingcomputer', 'cisa_kev'
+);

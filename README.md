@@ -16,14 +16,38 @@ backend/app/
   correlation/           Cross-source entity matching, auto-merge and review-queue logic
   routers/                FastAPI endpoints: breaches, companies, analytics, match queue
   scheduler.py            Runs every collector on a 6h cadence, logs every run
+  maintenance.py          Idempotent cleanup run before each batch (see below)
   cache.py                Redis caching + post-ingestion invalidation
 deployment/              docker-compose.yml, Dockerfile, .env.example
 ```
 
-The frontend (search/filter/sort/paginated breach ledger + single breach
-dossier view + analytics) was delivered separately as an interactive
-artifact - lift its components directly into a Next.js app - point
-`lib/api.js` at these endpoints.
+## Companies, not news
+
+The ledger lists breached companies — it is not a news aggregator. Only
+authoritative document types (`leak_site_post`, `ag_notification_letter`,
+`hhs_breach_report`, `sec_filing`, `lookup_summary`, `regulatory_action`)
+can create a new `breaches` row. News articles and government advisories
+never mint a company: they auto-merge into an existing breach's evidence
+log on a near-exact company-name match inside the correlation date window,
+land in the review queue when the match is uncertain, or stay stored as
+unlinked source records. When an authoritative report later creates the
+breach, `attach_unlinked_records()` sweeps up that earlier news coverage
+and links it, so the dossier still shows every article about the incident.
+
+`backend/app/maintenance.py` runs before each ingestion batch (see
+`.github/workflows/ingest.yml`) and is idempotent: it purges any breach
+row with no authoritative source behind it, deletes garbage records from
+untuned HTML scrapers, merges duplicate company rows, recomputes
+denormalized counts, disables sources that cannot run, and heals the
+materialized views.
+
+The frontend lives in `frontend/` (Vite + React + Tailwind compiled at
+build time): a search/filter/sort/paginated company ledger, a per-breach
+dossier drawer (incident date, disclosure date, threat actor, and every
+correlated source link — AG notices, filings, news coverage), and an
+analytics view. It reads Supabase's auto-API directly via
+`src/lib/supabaseClient.js`; set `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` at build time.
 
 ## Why DeHashed and Intelligence X are handled differently
 

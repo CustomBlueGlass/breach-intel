@@ -10,15 +10,13 @@ the scheduled registry entirely — see sources/dehashed_intelx.py.
 This reference implementation fully wires the sources that exercise each
 feed-type path end-to-end (RSS, JSON API, CSV, HTML fallback) plus the
 two on-demand lookup services. The remaining state-AG / nonprofit-tracker
-sources reuse HTMLFallbackCollector with a placeholder ScrapeConfig —
-update `row_selector` etc. for each (see ca_ag.py for the pattern) before
-enabling them in production; the collector log will report
-records_fetched=0 until selectors are filled in, rather than silently
-inserting garbage.
+sources need a hand-tuned ScrapeConfig (see ca_ag.py for the pattern)
+before they can run — until then they are skipped entirely rather than
+scraped with generic selectors, which used to insert headline/nav-text
+garbage into the ledger as if it were real AG notification data.
 """
 import logging
 
-from app.collectors.html_fallback_collector import HTMLFallbackCollector, ScrapeConfig
 from app.collectors.rss_collector import RSSCollector
 from app.collectors.sources.ca_ag import CaliforniaOAGCollector
 from app.collectors.sources.cisa_kev import CISAKEVCollector
@@ -42,9 +40,10 @@ EXPLICIT_COLLECTORS = {
     "california_oag": CaliforniaOAGCollector,
 }
 
-# Sources awaiting a hand-tuned ScrapeConfig (see module docstring). Each
-# uses a generic placeholder selector set that MUST be reviewed against the
-# live page before `enabled` is flipped to TRUE in breach_data_sources.
+# Sources awaiting a hand-tuned ScrapeConfig (see module docstring). Each is
+# skipped until real selectors are written for it — running them with a
+# generic placeholder config scrapes navigation/headline text and pollutes
+# the ledger. db/seed_sources.sql now ships them with enabled=FALSE too.
 PLACEHOLDER_HTML_SLUGS = {
     "ransom_db", "maine_ag", "mass_ag_breaches", "vermont_ag", "oregon_doj",
     "indiana_ag", "montana_doj", "delaware_ag", "north_dakota_ag",
@@ -61,28 +60,49 @@ NOT_YET_IMPLEMENTED_SLUGS = {
     "sec_edgar_search", "privacyrights_chronology",
 }
 
-GENERIC_PLACEHOLDER_CONFIG = ScrapeConfig(
-    row_selector="table tr, .breach-row, article",
-    company_selector="td:first-child, .org-name, h2 a",
-    date_selector="td.date, time, .published",
-    summary_selector="td.description, p",
-)
 
-
-def build_collector(source_row, http_client=None):
+def collector_available(source_row) -> bool:
+    """
+    Decide (and log) whether a scheduled collector exists for this source,
+    WITHOUT instantiating anything — instantiation opens an HTTP client, so
+    the scheduler calls this first and only builds collectors it will run.
+    """
     slug = source_row.slug
 
     if slug in ON_DEMAND_ONLY_SLUGS:
-        return None  # handled via enrich_company(), not the scheduler
+        return False  # handled via enrich_company(), not the scheduler
 
     if slug in NOT_YET_IMPLEMENTED_SLUGS:
-        # FIX: previously raised ValueError and crashed the collector run.
-        # Now logs a warning and returns None so the scheduler skips it cleanly.
-        logger.warning(
+        logger.info(
             "Collector for '%s' (feed_type=%s) not yet implemented — skipping",
             slug, source_row.feed_type,
         )
-        return None
+        return False
+
+    if slug in EXPLICIT_COLLECTORS:
+        return True
+
+    if source_row.feed_type == "rss" or slug in RSS_SLUGS:
+        return True
+
+    if slug in PLACEHOLDER_HTML_SLUGS or source_row.feed_type == "html_scrape":
+        logger.info(
+            "HTML source '%s' has no tuned ScrapeConfig yet — skipping "
+            "(write selectors like collectors/sources/ca_ag.py to enable it)",
+            slug,
+        )
+        return False
+
+    logger.warning(
+        "No collector wired for source '%s' (feed_type=%s) — skipping",
+        slug, source_row.feed_type,
+    )
+    return False
+
+
+def build_collector(source_row, http_client=None):
+    """Instantiate the collector for a source collector_available() said yes to."""
+    slug = source_row.slug
 
     if slug in EXPLICIT_COLLECTORS:
         return EXPLICIT_COLLECTORS[slug](source_row, http_client)
@@ -90,13 +110,4 @@ def build_collector(source_row, http_client=None):
     if source_row.feed_type == "rss" or slug in RSS_SLUGS:
         return RSSCollector(source_row, http_client)
 
-    if slug in PLACEHOLDER_HTML_SLUGS or source_row.feed_type == "html_scrape":
-        return HTMLFallbackCollector(source_row, GENERIC_PLACEHOLDER_CONFIG, http_client)
-
-    # FIX: previously raised ValueError and crashed the run for any unrecognised
-    # source. Now logs a warning and returns None so other collectors still run.
-    logger.warning(
-        "No collector wired for source '%s' (feed_type=%s) — skipping",
-        slug, source_row.feed_type,
-    )
     return None

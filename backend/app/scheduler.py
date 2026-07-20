@@ -18,7 +18,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import text
 
 from app.cache import invalidate_all
-from app.collectors.registry import build_collector
+from app.collectors.registry import build_collector, collector_available
 from app.config import settings
 from app.correlation.merge import IngestOutcome, ingest_record
 from app.db import get_session
@@ -34,6 +34,12 @@ async def _active_sources(session):
 
 
 async def run_one_collector(source_row) -> None:
+    # Decide whether a collector exists BEFORE inserting a log row — a row
+    # inserted first and then abandoned on `return` stays 'running' forever,
+    # which used to litter breach_collector_log with stuck rows every run.
+    if not collector_available(source_row):
+        return  # on-demand-only / unimplemented / untuned source, nothing to schedule
+
     async with get_session() as session:
         log_id = (
             await session.execute(
@@ -52,8 +58,6 @@ async def run_one_collector(source_row) -> None:
             timeout=30.0, headers={"User-Agent": settings.scraper_user_agent}, follow_redirects=True
         ) as client:
             collector = build_collector(source_row, client)
-            if collector is None:
-                return  # on-demand-only source, nothing to schedule
             records = await collector.collect()
             stats["fetched"] = len(records)
 
@@ -68,7 +72,7 @@ async def run_one_collector(source_row) -> None:
                     elif outcome.action == "queue_for_review":
                         stats["new"] += 1
                         stats["queued"] += 1
-                    elif outcome.action == "new_breach":
+                    elif outcome.action in ("new_breach", "stored_unlinked"):
                         stats["new"] += 1
 
         status = "success"
