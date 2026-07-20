@@ -163,7 +163,7 @@ export function Hero({ recent, totalSources, totalBreaches }) {
         </h1>
         <p className="mt-5 max-w-md text-sm leading-relaxed" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
           {totalSources} sources — ransomware leak sites, state AG portals, federal regulators, and security press —
-          pulled in every six hours, deduplicated, and correlated into a single dossier per incident.
+          pulled in every six hours, deduplicated, and combined into one detailed record per company breach.
         </p>
         <div className="flex items-center gap-6 mt-7">
           <div>
@@ -418,14 +418,30 @@ export function LedgerTable({ rows, onOpen, page, totalPages, setPage, total, pa
 
 /* ----------------------------- detail drawer ------------------------------ */
 
-export function BreachDetailDrawer({ breach, onClose, isOpen, loading }) {
+export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) {
   if (!isOpen) return null;
   if (loading || !breach) {
     return (
       <div className="fixed inset-0 z-30 flex justify-end" role="dialog" aria-modal="true">
         <div className="absolute inset-0" style={{ backgroundColor: 'rgba(0,0,0,0.55)' }} onClick={onClose} />
-        <div className="relative w-full max-w-md h-full flex items-center justify-center" style={{ backgroundColor: COLORS.panel, borderLeft: `1px solid ${COLORS.line}` }}>
-          <span style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 13 }}>Loading dossier…</span>
+        <div className="relative w-full max-w-md h-full flex flex-col items-center justify-center gap-3 px-8 text-center" style={{ backgroundColor: COLORS.panel, borderLeft: `1px solid ${COLORS.line}` }}>
+          {error ? (
+            <>
+              <span style={{ color: COLORS.red, fontFamily: FONT_MONO, fontSize: 13 }}>
+                Couldn't load breach details: {error}
+              </span>
+              <span style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY, fontSize: 12 }}>
+                If this keeps happening, the database's public read access may be missing —
+                it is re-applied automatically on the next ingestion run, or run
+                db/supabase_grants.sql manually.
+              </span>
+              <button onClick={onClose} className="mt-2 px-3 py-1.5 rounded-md text-sm" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+                Close
+              </button>
+            </>
+          ) : (
+            <span style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 13 }}>Loading breach details…</span>
+          )}
         </div>
       </div>
     );
@@ -444,7 +460,7 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading }) {
         <div className="flex items-start justify-between px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
           <div>
             <div className="text-xs uppercase tracking-widest mb-2" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
-              Case #{breach.id.slice(0, 8)}
+              Breach details · #{breach.id.slice(0, 8)}
             </div>
             <h2 style={{ fontFamily: FONT_DISPLAY, color: COLORS.bone, fontSize: 22, fontWeight: 600 }}>
               {breach.canonical_name}
@@ -502,7 +518,7 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading }) {
           <div className="flex items-center gap-2 mb-4">
             <ListChecks size={14} color={COLORS.boneFaint} />
             <span className="text-xs uppercase tracking-widest" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
-              Evidence log — sources &amp; coverage
+              Sources &amp; links
             </span>
           </div>
           {(breach.linked_sources || []).length === 0 && (

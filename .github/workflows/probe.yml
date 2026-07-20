@@ -1,0 +1,61 @@
+name: Probe a source page's HTML structure
+
+# Manual helper for writing ScrapeConfigs: fetches a URL from the runner
+# (which can reach sites this repo's dev environments often cannot) and
+# prints a trimmed outline of its tables/rows/links so real CSS selectors
+# can be written for collectors/sources/*.py without guessing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Page URL to inspect'
+        required: true
+        default: 'https://privacyrights.org/data-breaches'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch and outline page structure
+        run: |
+          pip -q install beautifulsoup4 lxml httpx
+          python3 - "$PAGE_URL" <<'EOF'
+          import sys, httpx
+          from bs4 import BeautifulSoup
+
+          url = sys.argv[1]
+          headers = {
+              "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+              "Accept": "text/html,application/xhtml+xml",
+          }
+          r = httpx.get(url, headers=headers, follow_redirects=True, timeout=30)
+          print(f"status={r.status_code} final_url={r.url} bytes={len(r.text)}")
+          soup = BeautifulSoup(r.text, "lxml")
+
+          for i, table in enumerate(soup.select("table")):
+              cls = " ".join(table.get("class", [])) or "(no class)"
+              rows = table.select("tr")
+              print(f"\n=== TABLE {i} class={cls!r} rows={len(rows)} ===")
+              for tr in rows[:4]:
+                  print("  ROW:", str(tr)[:600])
+
+          print("\n=== Candidate row containers (class contains breach/view/row/item) ===")
+          import re
+          seen = set()
+          for el in soup.find_all(class_=re.compile(r"breach|views-row|result|listing|item", re.I))[:15]:
+              key = (el.name, tuple(el.get("class", [])))
+              if key in seen:
+                  continue
+              seen.add(key)
+              print(f"\n<{el.name} class={el.get('class')}>")
+              print(" ", str(el)[:700])
+
+          print("\n=== Pagination hints ===")
+          for a in soup.select("a[href*='page'], .pager a, nav a")[:10]:
+              print(" ", a.get("href"), "|", a.get_text(strip=True)[:40])
+          EOF
+        env:
+          PAGE_URL: ${{ inputs.url }}
