@@ -31,7 +31,7 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 -- Federal regulatory
 ('hhs_ocr_breach_portal', 'HHS OCR Breach Portal',  'https://ocrportal.hhs.gov/ocr/breach/breach_report.jsf', 'federal_regulatory', 'csv', NULL, FALSE, 'scheduled', 'Portal exposes a CSV export of the breach report'),
 ('hipaa_journal',         'HIPAA Journal — Breach News', 'https://www.hipaajournal.com/category/data-breach-news', 'security_news', 'rss', 'https://www.hipaajournal.com/category/data-breach-news/feed/', FALSE, 'scheduled', NULL),
-('sec_edgar_search',      'SEC EDGAR Full-Text Search', 'https://www.sec.gov/edgar/search', 'sec_filing', 'json_api', 'https://efts.sec.gov/LATEST/search-index?q=%22cybersecurity+incident%22&forms=8-K', FALSE, 'scheduled', 'EDGAR full-text search has a documented JSON API; filter on Item 1.05 8-Ks'),
+('sec_edgar_search',      'SEC EDGAR Full-Text Search', 'https://www.sec.gov/edgar/search', 'sec_filing', 'json_api', 'https://efts.sec.gov/LATEST/search-index?q=%22material+cybersecurity+incident%22&forms=8-K', FALSE, 'scheduled', '8-K Item 1.05 filings via the EDGAR full-text search JSON API'),
 ('sec_cyber_disclosures', 'SEC — Cybersecurity Disclosures', 'https://www.sec.gov/securities-topics/cybersecurity', 'sec_filing', 'html_scrape', NULL, FALSE, 'scheduled', 'Guidance/index page; links resolved and crawled individually'),
 
 -- Security journalism / aggregators
@@ -82,6 +82,6 @@ UPDATE breach_data_sources SET enabled = FALSE WHERE slug IN (
     'idtheftcenter', 'privacyrights_breaches', 'enforcementtracker',
     'ic3', 'ico_enforcement', 'edpb', 'sec_cyber_disclosures',
     'mass_ag_reports', 'leakix_ransomware', 'washington_atg',
-    'sec_edgar_search', 'privacyrights_chronology',
+    'privacyrights_chronology',
     'bleepingcomputer', 'cisa_kev'
 );

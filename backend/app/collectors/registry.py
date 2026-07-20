@@ -23,6 +23,7 @@ from app.collectors.sources.cisa_kev import CISAKEVCollector
 from app.collectors.sources.hhs_ocr import HHSOCRCollector
 from app.collectors.sources.hibp import HIBPCollector
 from app.collectors.sources.ransomware_live import RansomwareLiveCollector
+from app.collectors.sources.sec_edgar import SECEdgarCollector
 
 logger = logging.getLogger("breach_intel.scheduler")
 
@@ -38,6 +39,7 @@ EXPLICIT_COLLECTORS = {
     "hhs_ocr_breach_portal": HHSOCRCollector,
     "haveibeenpwned": HIBPCollector,
     "california_oag": CaliforniaOAGCollector,
+    "sec_edgar_search": SECEdgarCollector,
 }
 
 # Sources awaiting a hand-tuned ScrapeConfig (see module docstring). Each is
@@ -57,7 +59,7 @@ ON_DEMAND_ONLY_SLUGS = {"dehashed", "intelx"}  # never scheduled — see sources
 # a dedicated collector implemented. Logged as skipped rather than crashing.
 NOT_YET_IMPLEMENTED_SLUGS = {
     "mass_ag_reports", "leakix_ransomware", "washington_atg",
-    "sec_edgar_search", "privacyrights_chronology",
+    "privacyrights_chronology",
 }
 
 

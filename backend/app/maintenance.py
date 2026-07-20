@@ -52,6 +52,15 @@ URL_FIXES = {
     "sec_cyber_disclosures": "https://www.sec.gov/securities-topics/cybersecurity",
 }
 
+# Sources that now have a working collector: re-enable them (they were
+# disabled by an earlier maintenance pass) and pin their verified feed_url.
+RE_ENABLE_SOURCES = {
+    "sec_edgar_search": (
+        "https://efts.sec.gov/LATEST/search-index?q=%22material+cybersecurity+incident%22&forms=8-K",
+        "8-K Item 1.05 filings via the EDGAR full-text search JSON API",
+    ),
+}
+
 PLATFORM_STATS_VIEW = """
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_platform_stats AS
 SELECT
@@ -156,6 +165,17 @@ async def fix_sources(session) -> None:
         )
         if res.rowcount:
             logger.info("Disabled source '%s' (%s)", slug, reason)
+
+    for slug, (feed_url, note) in RE_ENABLE_SOURCES.items():
+        res = await session.execute(
+            text(
+                "UPDATE breach_data_sources SET enabled = TRUE, feed_url = :fu, notes = :note "
+                "WHERE slug = :slug AND (NOT enabled OR feed_url IS DISTINCT FROM :fu)"
+            ),
+            {"slug": slug, "fu": feed_url, "note": note},
+        )
+        if res.rowcount:
+            logger.info("Re-enabled source '%s' (%s)", slug, note)
 
 
 async def purge_non_breach_entries(session) -> None:

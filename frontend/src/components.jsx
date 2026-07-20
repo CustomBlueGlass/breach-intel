@@ -32,7 +32,7 @@ export function SeverityTag({ severity }) {
   return <Tag style={{ color: m.text, backgroundColor: m.bg }}>{m.label}</Tag>;
 }
 
-export function SourceCategoryChip({ category, sourceName, docType, dateStr, confidence, url, isLast }) {
+export function SourceCategoryChip({ category, sourceName, docType, dateStr, confidence, url, summary, isLast }) {
   const meta = SOURCE_CATEGORY_META[category] || { label: category || 'Source', Icon: FileText };
   const Icon = meta.Icon;
   return (
@@ -69,6 +69,11 @@ export function SourceCategoryChip({ category, sourceName, docType, dateStr, con
         <div className="text-xs mt-0.5" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>
           {meta.label} · {(docType || '').replace(/_/g, ' ')} · {fmtDateTime(dateStr)}
         </div>
+        {summary && (
+          <p className="text-xs mt-1 leading-relaxed" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+            {String(summary).slice(0, 220)}{String(summary).length > 220 ? '…' : ''}
+          </p>
+        )}
         {url && (
           <a
             href={url}
@@ -418,6 +423,14 @@ export function LedgerTable({ rows, onOpen, page, totalPages, setPage, total, pa
 
 /* ----------------------------- detail drawer ------------------------------ */
 
+function disclosureLag(incident, disclosed) {
+  if (!incident || !disclosed) return '—';
+  const days = Math.round((new Date(disclosed + 'T00:00:00') - new Date(incident + 'T00:00:00')) / 86400000);
+  if (Number.isNaN(days)) return '—';
+  if (days <= 0) return 'same day';
+  return `${days} day${days === 1 ? '' : 's'}`;
+}
+
 export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) {
   if (!isOpen) return null;
   if (loading || !breach) {
@@ -490,9 +503,11 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
           {[
             ['Incident date', fmtDate(breach.incident_date)],
             ['Publicly disclosed', fmtDate(breach.disclosed_date)],
+            ['Time to disclosure', disclosureLag(breach.incident_date, breach.disclosed_date)],
             ['Threat actor', breach.ransomware_group || 'Unattributed'],
             ['Records affected (est.)', fmtNumber(breach.records_affected_est)],
             ['Location', [breach.region_state, breach.country].filter(Boolean).join(', ') || '—'],
+            ['Status', (breach.status || 'confirmed').replace(/^./, (c) => c.toUpperCase())],
             ['Correlated sources', breach.source_count],
             ['Avg. match confidence', breach.confidence_avg != null ? `${Math.round(breach.confidence_avg * 100)}%` : '—'],
           ].map(([label, val]) => (
@@ -502,6 +517,21 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
             </div>
           ))}
         </div>
+
+        {(breach.data_types_exposed || []).length > 0 && (
+          <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <div className="text-xs uppercase tracking-widest mb-2" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+              Data exposed
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {breach.data_types_exposed.map((t) => (
+                <Tag key={t} style={{ color: COLORS.amberSoft, backgroundColor: 'rgba(201,154,82,0.10)', border: `1px solid ${COLORS.line}` }}>
+                  {String(t).replace(/_/g, ' ')}
+                </Tag>
+              ))}
+            </div>
+          </div>
+        )}
 
         {breach.summary && (
           <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
@@ -535,9 +565,14 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
               dateStr={s.published_at}
               confidence={s.confidence}
               url={s.url}
+              summary={s.summary}
               isLast={i === breach.linked_sources.length - 1}
             />
           ))}
+        </div>
+
+        <div className="px-6 pb-6 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>
+          First seen {fmtDateTime(breach.first_seen_at)} · last updated {fmtDateTime(breach.last_updated_at)}
         </div>
       </div>
     </div>

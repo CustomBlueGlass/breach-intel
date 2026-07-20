@@ -78,6 +78,7 @@ export async function fetchBreachDetail(id) {
       published_at: s.source_published_at,
       confidence: s.match_confidence,
       url: s.source_record_url,
+      summary: s.summary,
     })),
   };
 }
