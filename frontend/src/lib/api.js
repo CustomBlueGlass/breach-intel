@@ -102,8 +102,17 @@ export async function fetchBreachDetail(id) {
     const p = s.raw_payload || {};
     const disc = p.DisclosureUrl || p.disclosure_url;
     if (disc) evidence.push({ kind: 'disclosure', url: disc, source: s.breach_data_sources?.name });
-    const shot = p.screenshot || p.screen || p.image;
-    if (shot) evidence.push({ kind: 'screenshot', url: shot, source: s.breach_data_sources?.name });
+    let shot = p.screenshot || p.screen || p.image;
+    // Older ransomware.live rows stored a path relative to the image host.
+    if (shot && !/^https?:\/\//.test(shot)) {
+      shot = `https://images.ransomware.live/${String(shot).replace(/^\/+/, '')}`;
+    }
+    if (shot) {
+      evidence.push({
+        kind: 'screenshot', url: shot, source: s.breach_data_sources?.name,
+        post: s.source_record_url,
+      });
+    }
   }
 
   return {
