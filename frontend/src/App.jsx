@@ -5,6 +5,7 @@ import {
   AnalyticsView, MatchQueueView, Footer,
 } from './components';
 import { ToolsView } from './tools';
+import { CommandPalette } from './palette';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
   fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
@@ -58,6 +59,7 @@ export default function App() {
   const [trends, setTrends] = useState([]);
   const [topGroups, setTopGroups] = useState([]);
   const [queueItems, setQueueItems] = useState([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   // One-time data: hero stats, intake ticker, filter dropdown options.
   useEffect(() => {
@@ -221,6 +223,13 @@ export default function App() {
       {tab === 'queue' && <MatchQueueView items={queueItems} />}
 
       <Footer />
+      <CommandPalette
+        open={paletteOpen}
+        setOpen={setPaletteOpen}
+        onOpenBreach={(row) => { setTab('ledger'); openBreach(row); }}
+        onFilterActor={(group) => { setTab('ledger'); setFilters({ ...filters, group }); }}
+        onSetTab={setTab}
+      />
       <BreachDetailDrawer
         breach={detail}
         isOpen={drawerOpen}

@@ -79,6 +79,19 @@ export async function fetchBreachesForExport({ filters, sortBy, sortDir, max = 1
   return data || [];
 }
 
+// Command-palette search: a few company/actor hits for jump-to navigation.
+export async function searchLedger(q, limit = 8) {
+  if (!q || !q.trim()) return [];
+  const term = q.trim().replace(/[,()*]/g, ' ');
+  const { data, error } = await supabase
+    .from('mv_breach_ledger')
+    .select('id, canonical_name, ransomware_group, industry, disclosed_date, incident_date')
+    .or(`canonical_name.ilike.%${term}%,ransomware_group.ilike.%${term}%`)
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
 export async function fetchBreachDetail(id) {
   const [{ data: breach, error: breachErr }, { data: sources, error: sourcesErr }] = await Promise.all([
     supabase.from('breaches').select('*').eq('id', id).single(),
