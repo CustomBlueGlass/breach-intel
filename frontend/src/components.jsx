@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
-  FileText, ExternalLink, Download, Copy, Link2, Check,
+  FileText, ExternalLink, Download, Copy, Link2, Check, Archive, ShieldCheck,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -75,17 +75,32 @@ export function SourceCategoryChip({ category, sourceName, docType, dateStr, con
           </p>
         )}
         {url && (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs mt-1 break-all hover:underline"
-            style={{ color: COLORS.amberSoft, fontFamily: FONT_MONO }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ExternalLink size={11} className="shrink-0" />
-            {url.replace(/^https?:\/\//, '')}
-          </a>
+          <div className="mt-1 flex flex-col gap-0.5">
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs break-all hover:underline"
+              style={{ color: COLORS.amberSoft, fontFamily: FONT_MONO }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink size={11} className="shrink-0" />
+              {url.replace(/^https?:\/\//, '')}
+            </a>
+            {/* Link permanence: leak sites and AG pages rot. A one-click
+                Archive.org snapshot lets an analyst cite a durable copy. */}
+            <a
+              href={`https://web.archive.org/web/2/${url}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs hover:underline"
+              style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}
+              onClick={(e) => e.stopPropagation()}
+              title="Open the most recent Web Archive snapshot of this source"
+            >
+              <Archive size={11} className="shrink-0" /> archived copy
+            </a>
+          </div>
         )}
       </div>
     </div>
@@ -98,6 +113,7 @@ export function TopBar({ tab, setTab, pendingCount }) {
   const tabs = [
     { id: 'ledger', label: 'Ledger' },
     { id: 'analytics', label: 'Analytics' },
+    { id: 'tools', label: 'Tools' },
     { id: 'queue', label: 'Match queue', badge: pendingCount },
   ];
   return (
@@ -598,6 +614,18 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
             <h2 style={{ fontFamily: FONT_DISPLAY, color: COLORS.bone, fontSize: 22, fontWeight: 600 }}>
               {breach.canonical_name}
             </h2>
+            {/* Corroboration: the single most trust-building signal — how many
+                independent sources assert this incident. */}
+            {(() => {
+              const n = breach.source_count || (breach.linked_sources || []).length || 0;
+              const multi = n >= 2;
+              return (
+                <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs" style={{ fontFamily: FONT_MONO, color: multi ? COLORS.teal : COLORS.boneFaint }}>
+                  <ShieldCheck size={12} />
+                  {multi ? `Corroborated by ${n} independent sources` : 'Single-source — awaiting corroboration'}
+                </div>
+              );
+            })()}
           </div>
           <button onClick={onClose} className="p-1.5 rounded-md" style={{ border: `1px solid ${COLORS.line}` }}>
             <X size={15} color={COLORS.boneDim} />
@@ -606,6 +634,11 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
 
         <div className="flex flex-wrap items-center gap-2 px-6 py-4" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
           <SeverityTag severity={breach.severity} />
+          {breach.severity && (
+            <span className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }} title="Severity is estimated from record volume, data sensitivity, and threat-actor attribution — not analyst-assigned.">
+              (estimated)
+            </span>
+          )}
           {breach.industry && (
             <Tag style={{ color: COLORS.bone, backgroundColor: COLORS.panelAlt }}>
               {INDUSTRY_LABELS[breach.industry] || breach.industry}
@@ -669,6 +702,25 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
             <p className="text-sm leading-relaxed" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
               {breach.summary}
             </p>
+          </div>
+        )}
+
+        {(breach.evidence || []).length > 0 && (
+          <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <div className="text-xs uppercase tracking-widest mb-2" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+              Evidence
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {breach.evidence.map((ev, i) => (
+                <a key={i} href={ev.url} target="_blank" rel="noopener noreferrer"
+                   className="inline-flex items-center gap-1.5 text-sm hover:underline"
+                   style={{ color: COLORS.teal, fontFamily: FONT_BODY }}>
+                  {ev.kind === 'screenshot' ? <Archive size={13} /> : <ShieldCheck size={13} />}
+                  {ev.kind === 'screenshot' ? 'Leak-site screenshot' : 'Official disclosure'}
+                  {ev.source ? <span style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>· via {ev.source}</span> : null}
+                </a>
+              ))}
+            </div>
           </div>
         )}
 
