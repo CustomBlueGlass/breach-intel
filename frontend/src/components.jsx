@@ -301,10 +301,14 @@ export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, set
         options={groupOptions}
       />
       <Select
-        value={filters.status}
-        onChange={(v) => setFilters({ ...filters, status: v })}
-        placeholder="Confirmed + disputed"
-        options={[{ value: 'confirmed', label: 'Confirmed only' }, { value: 'disputed', label: 'Disputed only' }]}
+        value={filters.attribution}
+        onChange={(v) => setFilters({ ...filters, attribution: v })}
+        placeholder="Any attribution"
+        options={[
+          { value: 'attributed', label: 'Attributed to a group' },
+          { value: 'unattributed', label: 'Unattributed' },
+          { value: 'disputed', label: 'Disputed' },
+        ]}
       />
       <div className="flex items-center gap-1">
         <DateInput label="Disclosed from" value={filters.dateFrom} onChange={(v) => setFilters({ ...filters, dateFrom: v })} />

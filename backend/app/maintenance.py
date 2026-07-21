@@ -29,6 +29,8 @@ from sqlalchemy import text
 from app.collectors.registry import NOT_YET_IMPLEMENTED_SLUGS, PLACEHOLDER_HTML_SLUGS
 from app.correlation.merge import BREACH_CREATING_DOC_TYPES, recompute_severity
 from app.db import get_session
+from app.normalize.company_name import normalize_company_name
+from app.normalize.ransomware_group_aliases import normalize_ransomware_group
 
 logger = logging.getLogger("breach_intel.maintenance")
 
@@ -338,6 +340,118 @@ async def dedupe_companies(session) -> None:
         logger.info("Removed %d orphaned/duplicate company rows", res.rowcount)
 
 
+async def merge_duplicate_breaches(session) -> None:
+    """
+    Collapse breaches that are the same incident but were stored separately
+    because a second source's blended score fell short of auto-merge (missing
+    industry/location) and got stranded — leaving each company at one source.
+    Two breaches merge when their normalized names are identical AND their
+    incident dates are within 45 days (or either is NULL); a company breached
+    years apart keeps distinct rows. Source records repoint to the oldest
+    breach; the duplicates are deleted.
+    """
+    # Group by the SAME suffix-stripped normalization the correlator uses, so
+    # "Contoso Ltd" and "Contoso Limited" collapse (a plain regex would not
+    # strip the legal suffix and would miss them).
+    rows = (await session.execute(
+        text("SELECT id, canonical_name, incident_date, first_seen_at FROM breaches ORDER BY first_seen_at")
+    )).fetchall()
+    buckets: dict[str, list] = {}
+    for r in rows:
+        key = normalize_company_name(r.canonical_name or "")
+        if not key:
+            continue
+        buckets.setdefault(key, []).append(r)
+
+    merged = 0
+    for key, brs in buckets.items():
+        if len(brs) < 2:
+            continue
+        keep = str(brs[0].id)
+        keep_date = brs[0].incident_date
+        drop = []
+        for b in brs[1:]:
+            d = b.incident_date
+            close = (keep_date is None or d is None or abs((d - keep_date).days) <= 45)
+            if close:
+                drop.append(str(b.id))
+        if not drop:
+            continue
+        await session.execute(
+            text("UPDATE breach_source_records SET matched_breach_id = :keep WHERE matched_breach_id = ANY(:drop)"),
+            {"keep": keep, "drop": drop},
+        )
+        await session.execute(
+            text("UPDATE breach_match_queue SET candidate_breach_id = :keep WHERE candidate_breach_id = ANY(:drop)"),
+            {"keep": keep, "drop": drop},
+        )
+        await session.execute(text("DELETE FROM breaches WHERE id = ANY(:drop)"), {"drop": drop})
+        merged += len(drop)
+    if merged:
+        logger.info("Merged %d duplicate breach rows into their canonical incident", merged)
+
+
+async def drain_strong_review_queue(session) -> None:
+    """
+    On a public read-only site nothing drains the human review queue, so a
+    second source whose blended score landed in the review band (exact name,
+    but missing industry/location) stays unlinked forever and the breach shows
+    one source. Auto-approve queue items that are clearly the same incident —
+    exact normalized name (name_score >= 0.90) within a 45-day window — by
+    linking the record to its candidate breach.
+    """
+    rows = (await session.execute(
+        text(
+            """
+            SELECT q.id AS qid, q.source_record_id, q.candidate_breach_id, q.confidence,
+                   (q.match_reasons->>'name_score')::float AS name_score,
+                   NULLIF(q.match_reasons->>'date_delta_days','')::int AS delta
+            FROM breach_match_queue q
+            WHERE q.status = 'pending' AND q.candidate_breach_id IS NOT NULL
+            """
+        )
+    )).fetchall()
+    drained = 0
+    for r in rows:
+        strong = (r.name_score is not None and r.name_score >= 0.90
+                  and ((r.delta is not None and r.delta <= 45) or r.name_score >= 0.97))
+        if not strong:
+            continue
+        await session.execute(
+            text("UPDATE breach_source_records SET matched_breach_id = :b, match_confidence = :c WHERE id = :r AND matched_breach_id IS NULL"),
+            {"b": str(r.candidate_breach_id), "c": r.confidence, "r": str(r.source_record_id)},
+        )
+        await session.execute(
+            text("UPDATE breach_match_queue SET status = 'approved', reviewed_at = now(), reviewed_by = 'auto-maintenance' WHERE id = :q"),
+            {"q": str(r.qid)},
+        )
+        drained += 1
+    if drained:
+        logger.info("Auto-approved %d strong review-queue matches into their breach", drained)
+
+
+async def renormalize_groups(session) -> None:
+    """
+    Collapse threat-actor name fragmentation (e.g. 'lockbit' / 'LockBit 3.0'
+    stored alongside canonical 'LockBit') so the actor filter and analytics
+    don't split one group across several values.
+    """
+    rows = (await session.execute(
+        text("SELECT DISTINCT ransomware_group FROM breaches WHERE ransomware_group IS NOT NULL")
+    )).fetchall()
+    changed = 0
+    for (raw,) in rows:
+        canon = normalize_ransomware_group(raw)
+        if canon and canon != raw:
+            await session.execute(
+                text("UPDATE breaches SET ransomware_group = :c WHERE ransomware_group = :r"),
+                {"c": canon, "r": raw},
+            )
+            changed += 1
+    if changed:
+        logger.info("Re-normalized %d fragmented threat-actor names", changed)
+
+
 async def backfill_breach_fields(session) -> None:
     """
     Fill breach fields that are still NULL from facts carried by the breach's
@@ -446,6 +560,12 @@ async def run_maintenance() -> None:
         await purge_non_breach_entries(session)
     async with get_session() as session:
         await dedupe_companies(session)
+    async with get_session() as session:
+        await drain_strong_review_queue(session)
+    async with get_session() as session:
+        await merge_duplicate_breaches(session)
+    async with get_session() as session:
+        await renormalize_groups(session)
     async with get_session() as session:
         await backfill_breach_fields(session)
     async with get_session() as session:

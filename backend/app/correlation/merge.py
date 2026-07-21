@@ -317,6 +317,24 @@ ATTACH_UNLINKED_QUERY = text(
 )
 
 
+def is_same_incident(reasons: dict) -> bool:
+    """
+    Two source records describe the same incident when the (normalized,
+    legal-suffix-stripped) company names match and the dates are close.
+    Records that lack industry/location/actor metadata — most AG notices,
+    HHS reports, HIBP entries and news — never reach the blended auto-merge
+    threshold on name alone, so an exact name inside a tight date window is
+    the reliable "same incident" signal. Normalization already collapses
+    "Acme Corp"/"Acme Corporation", so distinct companies rarely reach 0.90.
+    """
+    name_score = reasons.get("name_score", 0.0)
+    delta = reasons.get("date_delta_days")
+    return (
+        (name_score >= 0.90 and delta is not None and delta <= 45)
+        or name_score >= 0.97
+    )
+
+
 async def attach_unlinked_records(session: AsyncSession, breach_id: str, record) -> int:
     """
     News records arrive before regulators confirm a breach. When an
@@ -340,14 +358,7 @@ async def attach_unlinked_records(session: AsyncSession, breach_id: str, record)
     attached = 0
     for row in rows:
         match = score_candidate(row, breach_as_candidate)
-        # News/advisory records rarely carry industry/location metadata, so
-        # their blended score tops out around 0.75 even on an exact company
-        # name — treat a near-exact name inside the date window as a link,
-        # and send the merely-plausible ones to the human review queue.
-        strong_name = match.reasons.get("name_score", 0.0) >= 0.95
-        if match.confidence >= settings.auto_merge_confidence_threshold or (
-            strong_name and match.confidence >= settings.queue_confidence_threshold
-        ):
+        if match.confidence >= settings.auto_merge_confidence_threshold or is_same_incident(match.reasons):
             await link_record_to_breach(session, str(row.id), breach_id, match.confidence)
             attached += 1
         elif match.confidence >= settings.queue_confidence_threshold:
@@ -417,17 +428,13 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
     match = best_match(record, candidates)
     action = classify(match)
 
-    # News/advisory records carry too little metadata to reach the blended
-    # auto-merge threshold even on an exact company-name match — promote a
-    # near-exact name inside the candidate date window to a merge instead of
-    # burying obvious coverage in the review queue. Authoritative documents
-    # keep the strict threshold: two similarly-named companies must not merge
-    # on name alone.
-    if (
-        action == "queue_for_review"
-        and record.document_type not in BREACH_CREATING_DOC_TYPES
-        and match.reasons.get("name_score", 0.0) >= 0.95
-    ):
+    # Most sources (AG notices, HHS, HIBP, SEC, news) carry too little
+    # industry/location metadata to reach the blended auto-merge threshold
+    # even on a perfect company-name match — which used to strand a second
+    # source in the review queue, leaving the breach stuck at one source.
+    # Promote an exact-name-in-date-window match to a merge for every source
+    # type; the date window guards against merging distinct same-named firms.
+    if action == "queue_for_review" and is_same_incident(match.reasons):
         action = "auto_merge"
 
     if action == "auto_merge":

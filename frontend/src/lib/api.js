@@ -38,8 +38,15 @@ function applyLedgerFilters(query, filters) {
     query = query.or(`canonical_name.ilike.%${filters.q}%,ransomware_group.ilike.%${filters.q}%`);
   }
   if (filters.industry) query = query.eq('industry', filters.industry);
-  if (filters.group) query = query.eq('ransomware_group', filters.group);
-  if (filters.status) query = query.eq('status', filters.status);
+  // ilike without wildcards = case-insensitive exact match, so a dropdown
+  // value of "LockBit" still matches rows stored as "lockbit" across sources.
+  if (filters.group) query = query.ilike('ransomware_group', filters.group);
+  // Attribution replaces the old confirmed/disputed status filter, which never
+  // changed results (every breach is 'confirmed'). This segments the data that
+  // actually varies: ransomware-attributed victims vs regulator/HIBP entries.
+  if (filters.attribution === 'attributed') query = query.not('ransomware_group', 'is', null);
+  else if (filters.attribution === 'unattributed') query = query.is('ransomware_group', null);
+  else if (filters.attribution === 'disputed') query = query.eq('status', 'disputed');
   if (filters.dateFrom) query = query.gte('disclosed_date', filters.dateFrom);
   if (filters.dateTo) query = query.lte('disclosed_date', filters.dateTo);
   return query;
