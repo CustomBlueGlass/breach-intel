@@ -8,7 +8,10 @@ on:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A first-time pull from a bulk source (e.g. HIBP's ~800 breaches) runs
+    # every record through candidate correlation and needs well over 20
+    # minutes; steady-state runs dedup those records in seconds.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:

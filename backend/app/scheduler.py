@@ -62,7 +62,7 @@ async def run_one_collector(source_row) -> None:
             stats["fetched"] = len(records)
 
             async with get_session() as session:
-                for record in records:
+                for i, record in enumerate(records, 1):
                     outcome: IngestOutcome = await ingest_record(session, str(source_row.id), record)
                     if outcome.deduped:
                         stats["deduped"] += 1
@@ -74,6 +74,11 @@ async def run_one_collector(source_row) -> None:
                         stats["queued"] += 1
                     elif outcome.action in ("new_breach", "stored_unlinked"):
                         stats["new"] += 1
+                    # Commit in batches so a long first pull from a bulk source
+                    # keeps its progress if the job is killed partway — the
+                    # next run dedups what already landed and continues.
+                    if i % 100 == 0:
+                        await session.commit()
 
         status = "success"
     except Exception as exc:  # noqa: BLE001 — collector failures must not crash the scheduler

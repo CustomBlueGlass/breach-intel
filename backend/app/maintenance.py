@@ -197,6 +197,27 @@ async def fix_sources(session) -> None:
             logger.info("Re-enabled source '%s' (%s)", slug, cfg["note"])
 
 
+async def close_stale_collector_runs(session) -> None:
+    """
+    A killed/cancelled job (e.g. workflow timeout) leaves its collector-log
+    rows stuck in 'running' forever. Anything still 'running' after 2 hours
+    did not survive its run — mark it failed so the source-health view tells
+    the truth.
+    """
+    res = await session.execute(
+        text(
+            """
+            UPDATE breach_collector_log
+            SET status = 'failed', finished_at = now(),
+                error_message = 'run did not complete (job cancelled or timed out)'
+            WHERE status = 'running' AND started_at < now() - INTERVAL '2 hours'
+            """
+        )
+    )
+    if res.rowcount:
+        logger.info("Closed %d stale 'running' collector-log rows as failed", res.rowcount)
+
+
 async def purge_non_breach_entries(session) -> None:
     """
     Delete breach rows with no authoritative source behind them. A breach is
@@ -353,10 +374,16 @@ async def backfill_breach_fields(session) -> None:
                 GROUP BY r.matched_breach_id
             ) sub
             WHERE b.id = sub.bid
-              AND (b.ransomware_group IS NULL OR b.records_affected_est IS NULL
-                   OR b.incident_date IS NULL OR b.disclosed_date IS NULL
-                   OR b.summary IS NULL
-                   OR b.data_types_exposed IS NULL OR b.data_types_exposed = '{}'::text[])
+              AND (
+                   (b.ransomware_group IS NULL AND sub.group_norm IS NOT NULL)
+                OR (b.records_affected_est IS NULL AND sub.max_records IS NOT NULL)
+                OR (b.incident_date IS NULL AND sub.min_incident IS NOT NULL)
+                OR (b.disclosed_date IS NULL
+                    AND COALESCE(sub.min_published, b.incident_date, sub.min_incident) IS NOT NULL)
+                OR (b.summary IS NULL AND sub.any_summary IS NOT NULL)
+                OR ((b.data_types_exposed IS NULL OR b.data_types_exposed = '{}'::text[])
+                    AND sub.all_data_types IS NOT NULL)
+              )
             """
         )
     )
@@ -413,6 +440,8 @@ async def ensure_views(session) -> None:
 async def run_maintenance() -> None:
     async with get_session() as session:
         await fix_sources(session)
+    async with get_session() as session:
+        await close_stale_collector_runs(session)
     async with get_session() as session:
         await purge_non_breach_entries(session)
     async with get_session() as session:
