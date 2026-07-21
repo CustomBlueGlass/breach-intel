@@ -79,7 +79,7 @@ export async function fetchBreachDetail(id) {
       .from('breach_source_records')
       .select(
         'id, source_record_url, document_type, summary, source_published_at, match_confidence, ' +
-        'breach_data_sources ( name, category )'
+        'raw_payload, breach_data_sources ( name, category )'
       )
       .eq('matched_breach_id', id)
       .order('source_published_at', { ascending: false }),
@@ -87,8 +87,21 @@ export async function fetchBreachDetail(id) {
   if (breachErr) throw breachErr;
   if (sourcesErr) throw sourcesErr;
 
+  // Official disclosure / screenshot evidence, when a source carries it
+  // (e.g. HIBP's DisclosureUrl, ransomware.live's screenshot). Pulled from
+  // raw_payload so it can be surfaced as evidence without new columns.
+  const evidence = [];
+  for (const s of sources || []) {
+    const p = s.raw_payload || {};
+    const disc = p.DisclosureUrl || p.disclosure_url;
+    if (disc) evidence.push({ kind: 'disclosure', url: disc, source: s.breach_data_sources?.name });
+    const shot = p.screenshot || p.screen || p.image;
+    if (shot) evidence.push({ kind: 'screenshot', url: shot, source: s.breach_data_sources?.name });
+  }
+
   return {
     breach,
+    evidence,
     linked_sources: (sources || []).map((s) => ({
       source_name: s.breach_data_sources?.name,
       source_category: s.breach_data_sources?.category,

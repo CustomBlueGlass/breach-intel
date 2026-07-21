@@ -4,6 +4,7 @@ import {
   TopBar, Hero, FilterBar, LedgerTable, BreachDetailDrawer,
   AnalyticsView, MatchQueueView, Footer,
 } from './components';
+import { ToolsView } from './tools';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
   fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
@@ -102,7 +103,7 @@ export default function App() {
     setDetailError(null);
     window.history.replaceState(null, '', `#breach=${b.id}`);
     fetchBreachDetail(b.id)
-      .then(({ breach, linked_sources }) => setDetail({ ...breach, linked_sources }))
+      .then(({ breach, linked_sources, evidence }) => setDetail({ ...breach, linked_sources, evidence }))
       .catch((e) => {
         console.error('fetchBreachDetail', e);
         setDetailError(e?.message || String(e));
@@ -214,6 +215,8 @@ export default function App() {
           <AnalyticsView trends={trends} topGroups={topGroups} />
         </>
       )}
+
+      {tab === 'tools' && <ToolsView />}
 
       {tab === 'queue' && <MatchQueueView items={queueItems} />}
 
