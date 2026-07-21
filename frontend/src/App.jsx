@@ -36,7 +36,7 @@ export default function App() {
   useGoogleFonts();
 
   const [tab, setTab] = useState('ledger');
-  const [filters, setFilters] = useState({ q: '', industry: '', group: '', status: '', dateFrom: '', dateTo: '' });
+  const [filters, setFilters] = useState({ q: '', industry: '', group: '', attribution: '', dateFrom: '', dateTo: '' });
   const [sortBy, setSortBy] = useState('disclosed_date');
   const [sortDir, setSortDir] = useState('desc');
   const [page, setPage] = useState(1);
