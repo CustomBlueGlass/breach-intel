@@ -711,19 +711,36 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
 
         {(breach.evidence || []).length > 0 && (
           <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-            <div className="text-xs uppercase tracking-widest mb-2" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+            <div className="text-xs uppercase tracking-widest mb-3" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
               Evidence
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap gap-3">
               {breach.evidence.map((ev, i) => (
-                <a key={i} href={ev.url} target="_blank" rel="noopener noreferrer"
-                   className="inline-flex items-center gap-1.5 text-sm hover:underline"
-                   style={{ color: COLORS.teal, fontFamily: FONT_BODY }}>
-                  {ev.kind === 'screenshot' ? <Archive size={13} /> : <ShieldCheck size={13} />}
-                  {ev.kind === 'screenshot' ? 'Leak-site screenshot' : 'Official disclosure'}
-                  {ev.source ? <span style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>· via {ev.source}</span> : null}
-                </a>
+                ev.kind === 'screenshot' ? (
+                  <a key={i} href={ev.post || ev.url} target="_blank" rel="noopener noreferrer"
+                     className="block rounded-md overflow-hidden" style={{ border: `1px solid ${COLORS.line}`, width: 168 }}
+                     title="Open the leak-site post (opens the source in a new tab)">
+                    <img
+                      src={ev.url} alt="Leak-site post screenshot" loading="lazy" referrerPolicy="no-referrer"
+                      className="block w-full" style={{ height: 104, objectFit: 'cover', objectPosition: 'top', backgroundColor: COLORS.ink }}
+                      onError={(e) => { e.currentTarget.parentElement.style.display = 'none'; }}
+                    />
+                    <div className="px-2 py-1 text-xs flex items-center gap-1" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, backgroundColor: COLORS.panelAlt }}>
+                      <Archive size={10} /> screenshot{ev.source ? ` · ${ev.source}` : ''}
+                    </div>
+                  </a>
+                ) : (
+                  <a key={i} href={ev.url} target="_blank" rel="noopener noreferrer"
+                     className="inline-flex items-center gap-1.5 text-sm hover:underline self-start"
+                     style={{ color: COLORS.teal, fontFamily: FONT_BODY }}>
+                    <ShieldCheck size={13} /> Official disclosure
+                    {ev.source ? <span style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>· via {ev.source}</span> : null}
+                  </a>
+                )
               ))}
+            </div>
+            <div className="mt-2 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
+              Screenshots are hotlinked from the source tracker (not re-hosted) as evidence of the leak-site claim.
             </div>
           </div>
         )}
