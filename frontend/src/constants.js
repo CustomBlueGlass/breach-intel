@@ -65,6 +65,9 @@ export const SEVERITY_META = {
   moderate: { label: 'Moderate', text: COLORS.amberSoft, bg: 'rgba(201,154,82,0.14)' },
   high: { label: 'High', text: COLORS.amber, bg: 'rgba(217,142,51,0.16)' },
   critical: { label: 'Critical', text: COLORS.red, bg: 'rgba(192,71,58,0.18)' },
+  // No data yet to grade the impact — show that honestly instead of
+  // defaulting everything unknown to "Moderate".
+  unrated: { label: 'Unrated', text: COLORS.boneFaint, bg: 'rgba(107,114,128,0.12)' },
 };
 
 export function fmtNumber(n) {

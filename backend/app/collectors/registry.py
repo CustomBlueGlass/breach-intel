@@ -22,8 +22,10 @@ from app.collectors.sources.ca_ag import CaliforniaOAGCollector
 from app.collectors.sources.cisa_kev import CISAKEVCollector
 from app.collectors.sources.hhs_ocr import HHSOCRCollector
 from app.collectors.sources.hibp import HIBPCollector
+from app.collectors.sources.oregon_doj import OregonDOJCollector
 from app.collectors.sources.ransomware_live import RansomwareLiveCollector
 from app.collectors.sources.sec_edgar import SECEdgarCollector
+from app.collectors.sources.washington_atg import WashingtonAGCollector
 
 logger = logging.getLogger("breach_intel.scheduler")
 
@@ -40,6 +42,8 @@ EXPLICIT_COLLECTORS = {
     "haveibeenpwned": HIBPCollector,
     "california_oag": CaliforniaOAGCollector,
     "sec_edgar_search": SECEdgarCollector,
+    "washington_atg": WashingtonAGCollector,
+    "oregon_doj": OregonDOJCollector,
 }
 
 # Sources awaiting a hand-tuned ScrapeConfig (see module docstring). Each is
@@ -47,7 +51,7 @@ EXPLICIT_COLLECTORS = {
 # generic placeholder config scrapes navigation/headline text and pollutes
 # the ledger. db/seed_sources.sql now ships them with enabled=FALSE too.
 PLACEHOLDER_HTML_SLUGS = {
-    "ransom_db", "maine_ag", "mass_ag_breaches", "vermont_ag", "oregon_doj",
+    "ransom_db", "maine_ag", "mass_ag_breaches", "vermont_ag",
     "indiana_ag", "montana_doj", "delaware_ag", "north_dakota_ag",
     "idtheftcenter", "privacyrights_breaches", "enforcementtracker",
     "ic3", "ico_enforcement", "edpb", "sec_cyber_disclosures",
@@ -58,8 +62,7 @@ ON_DEMAND_ONLY_SLUGS = {"dehashed", "intelx"}  # never scheduled — see sources
 # Sources that have a csv/json_api feed_type in the seed but don't yet have
 # a dedicated collector implemented. Logged as skipped rather than crashing.
 NOT_YET_IMPLEMENTED_SLUGS = {
-    "mass_ag_reports", "leakix_ransomware", "washington_atg",
-    "privacyrights_chronology",
+    "mass_ag_reports", "leakix_ransomware", "privacyrights_chronology",
 }
 
 

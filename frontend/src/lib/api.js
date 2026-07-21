@@ -33,15 +33,21 @@ export async function fetchRansomwareGroupOptions() {
  * .range() maps to SQL LIMIT/OFFSET; { count: 'exact' } gets the total
  * without a second round-trip.
  */
-export async function fetchBreaches({ filters, sortBy, sortDir, page, pageSize = PAGE_SIZE }) {
-  let query = supabase.from('mv_breach_ledger').select('*', { count: 'exact' });
-
+function applyLedgerFilters(query, filters) {
   if (filters.q) {
     query = query.or(`canonical_name.ilike.%${filters.q}%,ransomware_group.ilike.%${filters.q}%`);
   }
   if (filters.industry) query = query.eq('industry', filters.industry);
   if (filters.group) query = query.eq('ransomware_group', filters.group);
   if (filters.status) query = query.eq('status', filters.status);
+  if (filters.dateFrom) query = query.gte('disclosed_date', filters.dateFrom);
+  if (filters.dateTo) query = query.lte('disclosed_date', filters.dateTo);
+  return query;
+}
+
+export async function fetchBreaches({ filters, sortBy, sortDir, page, pageSize = PAGE_SIZE }) {
+  let query = supabase.from('mv_breach_ledger').select('*', { count: 'exact' });
+  query = applyLedgerFilters(query, filters);
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
@@ -52,6 +58,18 @@ export async function fetchBreaches({ filters, sortBy, sortDir, page, pageSize =
 
   if (error) throw error;
   return { items: data, total: count ?? 0 };
+}
+
+// Export tool: same filters as the on-screen ledger, capped at 1000 rows so
+// a researcher can pull the current view into CSV/JSON for their own tooling.
+export async function fetchBreachesForExport({ filters, sortBy, sortDir, max = 1000 }) {
+  let query = supabase.from('mv_breach_ledger').select('*');
+  query = applyLedgerFilters(query, filters);
+  const { data, error } = await query
+    .order(sortBy, { ascending: sortDir === 'asc', nullsFirst: false })
+    .limit(max);
+  if (error) throw error;
+  return data || [];
 }
 
 export async function fetchBreachDetail(id) {

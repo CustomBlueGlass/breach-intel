@@ -27,7 +27,7 @@ import logging
 from sqlalchemy import text
 
 from app.collectors.registry import NOT_YET_IMPLEMENTED_SLUGS, PLACEHOLDER_HTML_SLUGS
-from app.correlation.merge import BREACH_CREATING_DOC_TYPES
+from app.correlation.merge import BREACH_CREATING_DOC_TYPES, recompute_severity
 from app.db import get_session
 
 logger = logging.getLogger("breach_intel.maintenance")
@@ -53,12 +53,29 @@ URL_FIXES = {
 }
 
 # Sources that now have a working collector: re-enable them (they were
-# disabled by an earlier maintenance pass) and pin their verified feed_url.
+# disabled by an earlier maintenance pass), pin their verified feed_url, and
+# correct the feed_type where discovery got it wrong in the original seed.
 RE_ENABLE_SOURCES = {
-    "sec_edgar_search": (
-        "https://efts.sec.gov/LATEST/search-index?q=%22material+cybersecurity+incident%22&forms=8-K",
-        "8-K Item 1.05 filings via the EDGAR full-text search JSON API",
-    ),
+    "sec_edgar_search": {
+        "feed_url": "https://efts.sec.gov/LATEST/search-index?q=%22material+cybersecurity+incident%22&forms=8-K",
+        "feed_type": "json_api",
+        "note": "8-K Item 1.05 filings via the EDGAR full-text search JSON API",
+    },
+    "washington_atg": {
+        "feed_url": "https://data.wa.gov/resource/sb4j-ca4h.json",
+        "feed_type": "json_api",
+        "note": "WA AG breach notifications via the state's Socrata open-data API (no key, updated daily)",
+    },
+    "oregon_doj": {
+        "feed_url": None,
+        "feed_type": "html_scrape",
+        "note": "Oregon DOJ breach notification table at justice.oregon.gov (positional HTML parse)",
+    },
+    "haveibeenpwned": {
+        "feed_url": "https://haveibeenpwned.com/api/v3/breaches",
+        "feed_type": "json_api",
+        "note": "The /breaches metadata endpoint requires NO API key (verified) — a key only raises rate limits",
+    },
 }
 
 PLATFORM_STATS_VIEW = """
@@ -166,16 +183,18 @@ async def fix_sources(session) -> None:
         if res.rowcount:
             logger.info("Disabled source '%s' (%s)", slug, reason)
 
-    for slug, (feed_url, note) in RE_ENABLE_SOURCES.items():
+    for slug, cfg in RE_ENABLE_SOURCES.items():
         res = await session.execute(
             text(
-                "UPDATE breach_data_sources SET enabled = TRUE, feed_url = :fu, notes = :note "
-                "WHERE slug = :slug AND (NOT enabled OR feed_url IS DISTINCT FROM :fu)"
+                "UPDATE breach_data_sources "
+                "SET enabled = TRUE, feed_url = :fu, feed_type = :ft, notes = :note, requires_api_key = FALSE "
+                "WHERE slug = :slug AND (NOT enabled OR feed_url IS DISTINCT FROM :fu "
+                "                        OR feed_type IS DISTINCT FROM :ft OR requires_api_key)"
             ),
-            {"slug": slug, "fu": feed_url, "note": note},
+            {"slug": slug, "fu": cfg["feed_url"], "ft": cfg["feed_type"], "note": cfg["note"]},
         )
         if res.rowcount:
-            logger.info("Re-enabled source '%s' (%s)", slug, note)
+            logger.info("Re-enabled source '%s' (%s)", slug, cfg["note"])
 
 
 async def purge_non_breach_entries(session) -> None:
@@ -298,6 +317,54 @@ async def dedupe_companies(session) -> None:
         logger.info("Removed %d orphaned/duplicate company rows", res.rowcount)
 
 
+async def backfill_breach_fields(session) -> None:
+    """
+    Fill breach fields that are still NULL from facts carried by the breach's
+    already-linked source records (group from leak posts, record counts from
+    HHS/HIBP, earliest published date as the disclosure date), then derive
+    severity. Keeps the ledger's threat-actor/disclosed/records columns
+    populated for rows ingested before merge-time enrichment existed.
+    """
+    res = await session.execute(
+        text(
+            """
+            UPDATE breaches b SET
+                ransomware_group = COALESCE(b.ransomware_group, sub.group_norm),
+                records_affected_est = COALESCE(b.records_affected_est, sub.max_records),
+                incident_date = COALESCE(b.incident_date, sub.min_incident),
+                disclosed_date = COALESCE(b.disclosed_date, sub.min_published, b.incident_date, sub.min_incident),
+                summary = COALESCE(b.summary, sub.any_summary),
+                data_types_exposed = CASE
+                    WHEN b.data_types_exposed IS NULL OR b.data_types_exposed = '{}'::text[]
+                        THEN sub.all_data_types
+                    ELSE b.data_types_exposed
+                END
+            FROM (
+                SELECT r.matched_breach_id AS bid,
+                       (array_agg(r.ransomware_group_norm) FILTER (WHERE r.ransomware_group_norm IS NOT NULL))[1] AS group_norm,
+                       max(r.records_affected_est) AS max_records,
+                       min(r.incident_date) AS min_incident,
+                       CAST(min(r.source_published_at) AS date) AS min_published,
+                       (array_agg(r.summary) FILTER (WHERE r.summary IS NOT NULL))[1] AS any_summary,
+                       array_agg(DISTINCT dt_elem) FILTER (WHERE dt_elem IS NOT NULL) AS all_data_types
+                FROM breach_source_records r
+                LEFT JOIN LATERAL unnest(COALESCE(r.data_types_exposed, '{}'::text[])) AS dt_elem ON TRUE
+                WHERE r.matched_breach_id IS NOT NULL
+                GROUP BY r.matched_breach_id
+            ) sub
+            WHERE b.id = sub.bid
+              AND (b.ransomware_group IS NULL OR b.records_affected_est IS NULL
+                   OR b.incident_date IS NULL OR b.disclosed_date IS NULL
+                   OR b.summary IS NULL
+                   OR b.data_types_exposed IS NULL OR b.data_types_exposed = '{}'::text[])
+            """
+        )
+    )
+    if res.rowcount:
+        logger.info("Backfilled missing fields on %d breaches from linked sources", res.rowcount)
+    await recompute_severity(session)
+
+
 async def recompute_denormalized(session) -> None:
     await session.execute(
         text(
@@ -350,6 +417,8 @@ async def run_maintenance() -> None:
         await purge_non_breach_entries(session)
     async with get_session() as session:
         await dedupe_companies(session)
+    async with get_session() as session:
+        await backfill_breach_fields(session)
     async with get_session() as session:
         await recompute_denormalized(session)
     async with get_session() as session:

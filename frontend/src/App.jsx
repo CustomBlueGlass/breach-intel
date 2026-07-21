@@ -6,16 +6,36 @@ import {
 } from './components';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
-  fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
+  fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
 } from './lib/api';
 
 const PAGE_SIZE = 25;
+
+function downloadBlob(content, filename, mime) {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function toCsv(rows) {
+  if (!rows.length) return '';
+  const cols = Object.keys(rows[0]);
+  const esc = (v) => {
+    if (v == null) return '';
+    const s = Array.isArray(v) ? v.join(';') : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n');
+}
 
 export default function App() {
   useGoogleFonts();
 
   const [tab, setTab] = useState('ledger');
-  const [filters, setFilters] = useState({ q: '', industry: '', group: '', status: '' });
+  const [filters, setFilters] = useState({ q: '', industry: '', group: '', status: '', dateFrom: '', dateTo: '' });
   const [sortBy, setSortBy] = useState('disclosed_date');
   const [sortDir, setSortDir] = useState('desc');
   const [page, setPage] = useState(1);
@@ -80,6 +100,7 @@ export default function App() {
     setDetailLoading(true);
     setDetail(null);
     setDetailError(null);
+    window.history.replaceState(null, '', `#breach=${b.id}`);
     fetchBreachDetail(b.id)
       .then(({ breach, linked_sources }) => setDetail({ ...breach, linked_sources }))
       .catch((e) => {
@@ -87,6 +108,42 @@ export default function App() {
         setDetailError(e?.message || String(e));
       })
       .finally(() => setDetailLoading(false));
+  }
+
+  function closeDrawer() {
+    setDrawerOpen(false);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+
+  // Permalink support: #breach=<id> opens that company's details directly,
+  // so researchers can share a link straight to a case.
+  useEffect(() => {
+    const m = window.location.hash.match(/^#breach=([0-9a-f-]{36})$/i);
+    if (m) openBreach({ id: m[1] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Export tool: current filters/sort, capped at 1000 rows.
+  function exportLedger(format) {
+    fetchBreachesForExport({ filters, sortBy, sortDir })
+      .then((rows) => {
+        const stamp = new Date().toISOString().slice(0, 10);
+        if (format === 'csv') {
+          downloadBlob(toCsv(rows), `breaches-${stamp}.csv`, 'text/csv');
+        } else {
+          downloadBlob(JSON.stringify(rows, null, 2), `breaches-${stamp}.json`, 'application/json');
+        }
+      })
+      .catch((e) => console.error('export', e));
+  }
+
+  function sortByColumn(key) {
+    if (sortBy === key) {
+      setSortDir(sortDir === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortBy(key);
+      setSortDir('desc');
+    }
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -115,6 +172,7 @@ export default function App() {
             sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir}
             resultCount={total}
             groupOptions={groupOptions}
+            onExport={exportLedger}
           />
           {listError ? (
             <div className="px-6 py-10 text-sm" style={{ color: COLORS.red, fontFamily: 'monospace' }}>
@@ -128,8 +186,10 @@ export default function App() {
             <LedgerTable
               rows={loadingList ? [] : rows}
               onOpen={openBreach}
+              onActorClick={(group) => setFilters({ ...filters, group })}
               page={page} totalPages={totalPages} setPage={setPage}
               total={total} pageSize={PAGE_SIZE}
+              sortBy={sortBy} sortDir={sortDir} onSort={sortByColumn}
             />
           )}
         </>
@@ -163,7 +223,7 @@ export default function App() {
         isOpen={drawerOpen}
         loading={detailLoading}
         error={detailError}
-        onClose={() => setDrawerOpen(false)}
+        onClose={closeDrawer}
       />
     </div>
   );
