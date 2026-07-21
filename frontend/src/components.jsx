@@ -429,6 +429,40 @@ export function LedgerRow({ b, onOpen, onActorClick }) {
   );
 }
 
+export function LedgerCard({ b, onOpen, onActorClick }) {
+  return (
+    <button
+      onClick={() => onOpen(b)}
+      className="w-full text-left px-4 py-3 active:bg-white/[0.04]"
+      style={{ borderBottom: `1px solid ${COLORS.lineFaint}` }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-medium truncate" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>{b.canonical_name}</div>
+          <div className="text-xs truncate" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>
+            {[INDUSTRY_LABELS[b.industry] || b.industry, [b.region_state, b.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '—'}
+          </div>
+        </div>
+        <SeverityTag severity={b.severity} />
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneDim }}>
+        {b.ransomware_group ? (
+          <span
+            role="button"
+            onClick={(e) => { e.stopPropagation(); onActorClick?.(b.ransomware_group); }}
+            style={{ color: COLORS.red }}
+          >
+            {b.ransomware_group}
+          </span>
+        ) : <span style={{ color: COLORS.boneFaint }}>Unattributed</span>}
+        <span>{b.disclosed_date ? fmtDate(b.disclosed_date) : (b.incident_date ? `~${fmtDate(b.incident_date)}` : '—')}</span>
+        <span>{b.records_affected_est != null ? `${fmtNumber(b.records_affected_est)} recs` : 'undisclosed'}</span>
+        <span style={{ color: COLORS.boneFaint }}>{b.source_count} src</span>
+      </div>
+    </button>
+  );
+}
+
 export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setPage, total, pageSize, sortBy, sortDir, onSort }) {
   const headers = [
     { label: 'Company', key: null },
@@ -445,7 +479,9 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
 
   return (
     <div>
-      <div className="overflow-x-auto">
+      {/* Desktop: full sortable table. Hidden below md, where an 8-column
+          table is unusable — a card list renders instead. */}
+      <div className="overflow-x-auto hidden md:block">
         <table className="w-full" style={{ borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${COLORS.line}` }}>
@@ -476,15 +512,21 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
             {rows.map((b) => <LedgerRow key={b.id} b={b} onOpen={onOpen} onActorClick={onActorClick} />)}
           </tbody>
         </table>
-        {rows.length === 0 && (
-          <div className="flex flex-col items-center py-16 gap-2">
-            <Inbox size={28} color={COLORS.boneFaint} />
-            <p style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }} className="text-sm">
-              No breaches match these filters. Try widening the date range or clearing a filter.
-            </p>
-          </div>
-        )}
       </div>
+
+      {/* Mobile: one card per breach. */}
+      <div className="md:hidden">
+        {rows.map((b) => <LedgerCard key={b.id} b={b} onOpen={onOpen} onActorClick={onActorClick} />)}
+      </div>
+
+      {rows.length === 0 && (
+        <div className="flex flex-col items-center py-16 gap-2">
+          <Inbox size={28} color={COLORS.boneFaint} />
+          <p style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }} className="text-sm">
+            No breaches match these filters. Try widening the date range or clearing a filter.
+          </p>
+        </div>
+      )}
       <div className="flex items-center justify-between px-6 py-4" style={{ borderTop: `1px solid ${COLORS.line}` }}>
         <span className="text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}>
           Showing {total === 0 ? 0 : startIdx}–{endIdx} of {total} — never the full dataset
