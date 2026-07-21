@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
-  FileText, ExternalLink,
+  FileText, ExternalLink, Download, Copy, Link2, Check,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -28,7 +28,7 @@ export function Tag({ children, style, className = '' }) {
 }
 
 export function SeverityTag({ severity }) {
-  const m = SEVERITY_META[severity] || SEVERITY_META.moderate;
+  const m = SEVERITY_META[severity] || SEVERITY_META.unrated;
   return <Tag style={{ color: m.text, backgroundColor: m.bg }}>{m.label}</Tag>;
 }
 
@@ -242,7 +242,24 @@ export function Select({ value, onChange, options, placeholder }) {
   );
 }
 
-export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, setSortDir, resultCount, groupOptions = [] }) {
+function DateInput({ value, onChange, label }) {
+  return (
+    <input
+      type="date"
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={label}
+      title={label}
+      className="text-sm rounded-md px-2 py-1.5 outline-none"
+      style={{
+        fontFamily: FONT_MONO, backgroundColor: COLORS.panelAlt, color: value ? COLORS.bone : COLORS.boneFaint,
+        border: `1px solid ${COLORS.line}`, colorScheme: 'dark',
+      }}
+    />
+  );
+}
+
+export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, setSortDir, resultCount, groupOptions = [], onExport }) {
   return (
     <div className="flex flex-wrap items-center gap-2 px-6 py-4" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
       <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -273,6 +290,11 @@ export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, set
         placeholder="Confirmed + disputed"
         options={[{ value: 'confirmed', label: 'Confirmed only' }, { value: 'disputed', label: 'Disputed only' }]}
       />
+      <div className="flex items-center gap-1">
+        <DateInput label="Disclosed from" value={filters.dateFrom} onChange={(v) => setFilters({ ...filters, dateFrom: v })} />
+        <span className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>→</span>
+        <DateInput label="Disclosed to" value={filters.dateTo} onChange={(v) => setFilters({ ...filters, dateTo: v })} />
+      </div>
       <button
         onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
         className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md"
@@ -287,6 +309,7 @@ export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, set
         placeholder="Sort: Disclosed date"
         options={[
           { value: 'disclosed_date', label: 'Sort: Disclosed date' },
+          { value: 'incident_date', label: 'Sort: Incident date' },
           { value: 'records_affected_est', label: 'Sort: Records affected' },
           { value: 'source_count', label: 'Sort: Source count' },
           { value: 'confidence_avg', label: 'Sort: Confidence' },
@@ -295,17 +318,35 @@ export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, set
       <span className="ml-auto text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}>
         {resultCount} match{resultCount === 1 ? '' : 'es'}
       </span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onExport?.('csv')}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md"
+          title="Download the current filtered view as CSV (up to 1000 rows)"
+          style={{ fontFamily: FONT_MONO, color: COLORS.boneDim, border: `1px solid ${COLORS.line}` }}
+        >
+          <Download size={12} /> CSV
+        </button>
+        <button
+          onClick={() => onExport?.('json')}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md"
+          title="Download the current filtered view as JSON (up to 1000 rows)"
+          style={{ fontFamily: FONT_MONO, color: COLORS.boneDim, border: `1px solid ${COLORS.line}` }}
+        >
+          <Download size={12} /> JSON
+        </button>
+      </div>
     </div>
   );
 }
 
 /* -------------------------------- ledger table --------------------------- */
 
-export function LedgerRow({ b, onOpen }) {
+export function LedgerRow({ b, onOpen, onActorClick }) {
   return (
     <tr
       onClick={() => onOpen(b)}
-      className="cursor-pointer transition-colors group"
+      className="cursor-pointer transition-colors group hover:bg-white/[0.03]"
       style={{ borderBottom: `1px solid ${COLORS.lineFaint}` }}
     >
       <td className="px-6 py-3">
@@ -319,14 +360,34 @@ export function LedgerRow({ b, onOpen }) {
           ].filter(Boolean).join(' · ') || '—'}
         </div>
       </td>
-      <td className="px-4 py-3 text-sm" style={{ color: b.ransomware_group ? COLORS.bone : COLORS.boneFaint, fontFamily: FONT_BODY }}>
-        {b.ransomware_group || '—'}
+      <td className="px-4 py-3 text-sm">
+        {b.ransomware_group ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onActorClick?.(b.ransomware_group); }}
+            className="hover:underline"
+            title={`Filter ledger to ${b.ransomware_group}`}
+            style={{ color: COLORS.red, fontFamily: FONT_BODY }}
+          >
+            {b.ransomware_group}
+          </button>
+        ) : (
+          <span style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Unattributed</span>
+        )}
       </td>
-      <td className="px-4 py-3 text-sm" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>
-        {fmtDate(b.disclosed_date)}
+      <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>
+        {fmtDate(b.incident_date)}
       </td>
-      <td className="px-4 py-3 text-sm text-right" style={{ color: COLORS.bone, fontFamily: FONT_MONO }}>
-        {fmtNumber(b.records_affected_est)}
+      <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>
+        {b.disclosed_date ? fmtDate(b.disclosed_date) : (
+          b.incident_date
+            ? <span title="No separate disclosure date on record — showing incident date" style={{ color: COLORS.boneFaint }}>~{fmtDate(b.incident_date)}</span>
+            : '—'
+        )}
+      </td>
+      <td className="px-4 py-3 text-sm text-right whitespace-nowrap" style={{ fontFamily: FONT_MONO }}>
+        {b.records_affected_est != null
+          ? <span style={{ color: COLORS.bone }}>{fmtNumber(b.records_affected_est)}</span>
+          : <span style={{ color: COLORS.boneFaint, fontSize: 12 }}>undisclosed</span>}
       </td>
       <td className="px-4 py-3 text-center">
         <span
@@ -348,13 +409,14 @@ export function LedgerRow({ b, onOpen }) {
   );
 }
 
-export function LedgerTable({ rows, onOpen, page, totalPages, setPage, total, pageSize }) {
+export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setPage, total, pageSize, sortBy, sortDir, onSort }) {
   const headers = [
     { label: 'Company', key: null },
     { label: 'Threat actor', key: null },
-    { label: 'Disclosed', key: null },
-    { label: 'Records', key: null, right: true },
-    { label: 'Sources', key: null, center: true },
+    { label: 'Incident', key: 'incident_date' },
+    { label: 'Disclosed', key: 'disclosed_date' },
+    { label: 'Records', key: 'records_affected_est', right: true },
+    { label: 'Sources', key: 'source_count', center: true },
     { label: 'Severity', key: null },
     { label: '', key: null },
   ];
@@ -370,16 +432,28 @@ export function LedgerTable({ rows, onOpen, page, totalPages, setPage, total, pa
               {headers.map((h, i) => (
                 <th
                   key={i}
-                  className={`px-4 py-2 text-xs uppercase font-medium ${h.right ? 'text-right' : h.center ? 'text-center' : 'text-left'}`}
+                  className={`px-4 py-2 text-xs uppercase font-medium whitespace-nowrap ${h.right ? 'text-right' : h.center ? 'text-center' : 'text-left'}`}
                   style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.06em', ...(i === 0 ? { paddingLeft: 24 } : {}) }}
                 >
-                  {h.label}
+                  {h.key ? (
+                    <button
+                      onClick={() => onSort?.(h.key)}
+                      className="uppercase hover:underline inline-flex items-center gap-1"
+                      title={`Sort by ${h.label.toLowerCase()}`}
+                      style={{
+                        fontFamily: FONT_MONO, letterSpacing: '0.06em',
+                        color: sortBy === h.key ? COLORS.amber : COLORS.boneFaint,
+                      }}
+                    >
+                      {h.label}{sortBy === h.key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+                    </button>
+                  ) : h.label}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((b) => <LedgerRow key={b.id} b={b} onOpen={onOpen} />)}
+            {rows.map((b) => <LedgerRow key={b.id} b={b} onOpen={onOpen} onActorClick={onActorClick} />)}
           </tbody>
         </table>
         {rows.length === 0 && (
@@ -429,6 +503,52 @@ function disclosureLag(incident, disclosed) {
   if (Number.isNaN(days)) return '—';
   if (days <= 0) return 'same day';
   return `${days} day${days === 1 ? '' : 's'}`;
+}
+
+// Researcher tool: one-click plain-text case summary for notes / reports.
+function breachReportText(breach) {
+  const lines = [
+    `# ${breach.canonical_name} — breach summary`,
+    '',
+    `Incident date:      ${breach.incident_date || 'unknown'}`,
+    `Publicly disclosed: ${breach.disclosed_date || 'unknown'}`,
+    `Threat actor:       ${breach.ransomware_group || 'unattributed'}`,
+    `Records affected:   ${breach.records_affected_est ?? 'undisclosed'}`,
+    `Industry:           ${breach.industry || 'unknown'}`,
+    `Location:           ${[breach.region_state, breach.country].filter(Boolean).join(', ') || 'unknown'}`,
+    `Severity:           ${breach.severity || 'unrated'}`,
+    `Status:             ${breach.status || 'confirmed'}`,
+    `Data exposed:       ${(breach.data_types_exposed || []).join(', ') || 'unknown'}`,
+  ];
+  if (breach.summary) lines.push('', `Summary: ${breach.summary}`);
+  const sources = breach.linked_sources || [];
+  if (sources.length) {
+    lines.push('', 'Sources:');
+    for (const s of sources) {
+      lines.push(`  - [${(s.document_type || 'source').replace(/_/g, ' ')}] ${s.source_name || ''} ${s.published_at ? `(${s.published_at})` : ''}`.trimEnd());
+      if (s.url) lines.push(`    ${s.url}`);
+    }
+  }
+  lines.push('', `Case ID: ${breach.id}`);
+  return lines.join('\n');
+}
+
+function CopyButton({ getText, label, Icon = Copy }) {
+  const [done, setDone] = React.useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard?.writeText(getText()).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        });
+      }}
+      className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md"
+      style={{ fontFamily: FONT_MONO, color: done ? COLORS.teal : COLORS.boneDim, border: `1px solid ${COLORS.line}` }}
+    >
+      {done ? <Check size={12} /> : <Icon size={12} />} {done ? 'Copied' : label}
+    </button>
+  );
 }
 
 export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) {
@@ -484,7 +604,7 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-2 px-6 py-4" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+        <div className="flex flex-wrap items-center gap-2 px-6 py-4" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
           <SeverityTag severity={breach.severity} />
           {breach.industry && (
             <Tag style={{ color: COLORS.bone, backgroundColor: COLORS.panelAlt }}>
@@ -497,6 +617,14 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
           {breach.status === 'disputed' && (
             <Tag style={{ color: COLORS.amber, backgroundColor: 'rgba(217,142,51,0.12)' }}>Disputed</Tag>
           )}
+          <div className="ml-auto flex items-center gap-1">
+            <CopyButton label="Copy report" getText={() => breachReportText(breach)} />
+            <CopyButton
+              label="Copy link"
+              Icon={Link2}
+              getText={() => `${window.location.origin}${window.location.pathname}#breach=${breach.id}`}
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>

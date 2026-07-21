@@ -176,8 +176,47 @@ async def create_new_breach(session: AsyncSession, record) -> str:
     return str(row.first().id)
 
 
+# Severity derived from scale + sensitivity of exposed data. Reused by the
+# maintenance backfill (WHERE true) and per-breach after each merge.
+SENSITIVE_DATA_TYPES = (
+    "ssn", "social_security_number", "protected_health_information", "medical",
+    "passwords", "password_hints", "financial_account", "bank_account",
+    "credit_card", "payment_card", "drivers_license", "passport",
+)
+
+SEVERITY_RECOMPUTE_SQL = """
+UPDATE breaches b SET severity = sub.new_severity
+FROM (
+    SELECT id,
+        CASE
+            WHEN records_affected_est >= 10000000 THEN 'critical'
+            WHEN records_affected_est >= 1000000
+                 OR (records_affected_est >= 100000 AND data_types_exposed && CAST(:sensitive AS text[]))
+                THEN 'high'
+            WHEN records_affected_est >= 10000
+                 OR data_types_exposed && CAST(:sensitive AS text[])
+                 OR ransomware_group IS NOT NULL
+                THEN 'moderate'
+            WHEN records_affected_est IS NOT NULL THEN 'low'
+            ELSE NULL
+        END AS new_severity
+    FROM breaches
+    {where}
+) sub
+WHERE sub.id = b.id AND sub.new_severity IS DISTINCT FROM b.severity
+"""
+
+
+async def recompute_severity(session: AsyncSession, breach_id: str | None = None) -> None:
+    where = "WHERE id = :bid" if breach_id else ""
+    await session.execute(
+        text(SEVERITY_RECOMPUTE_SQL.format(where=where)),
+        {"sensitive": list(SENSITIVE_DATA_TYPES), **({"bid": breach_id} if breach_id else {})},
+    )
+
+
 async def link_record_to_breach(
-    session: AsyncSession, source_record_id: str, breach_id: str, confidence: float
+    session: AsyncSession, source_record_id: str, breach_id: str, confidence: float, record=None
 ) -> None:
     await session.execute(
         text(
@@ -198,6 +237,48 @@ async def link_record_to_breach(
         ),
         {"c": confidence, "bid": breach_id},
     )
+    if record is not None:
+        # Each merged source fills in facts the breach is still missing:
+        # a leak-site post names the group, an HHS report brings the record
+        # count, a news article brings the earliest public date. This is what
+        # keeps the ledger's threat-actor/disclosed/records columns populated
+        # instead of "—".
+        await session.execute(
+            text(
+                """
+                UPDATE breaches SET
+                    ransomware_group = COALESCE(ransomware_group, :group),
+                    summary = COALESCE(summary, :summary),
+                    incident_date = LEAST(
+                        COALESCE(incident_date, CAST(:inc AS date)),
+                        COALESCE(CAST(:inc AS date), incident_date)),
+                    disclosed_date = LEAST(
+                        COALESCE(disclosed_date, CAST(:disc AS date)),
+                        COALESCE(CAST(:disc AS date), disclosed_date)),
+                    records_affected_est = CASE
+                        WHEN CAST(:records AS bigint) IS NULL THEN records_affected_est
+                        ELSE GREATEST(COALESCE(records_affected_est, 0), CAST(:records AS bigint))
+                    END,
+                    data_types_exposed = CASE
+                        WHEN CAST(:dt AS text[]) IS NULL OR CAST(:dt AS text[]) = '{}'::text[]
+                            THEN data_types_exposed
+                        ELSE (SELECT array_agg(DISTINCT x)
+                              FROM unnest(COALESCE(data_types_exposed, '{}'::text[]) || CAST(:dt AS text[])) AS x)
+                    END
+                WHERE id = :bid
+                """
+            ),
+            {
+                "bid": breach_id,
+                "group": record.ransomware_group_norm,
+                "summary": record.summary,
+                "inc": record.incident_date,
+                "disc": record.source_published_at.date() if record.source_published_at else None,
+                "records": record.records_affected_est,
+                "dt": record.data_types_exposed or None,
+            },
+        )
+        await recompute_severity(session, breach_id)
 
 
 async def queue_for_review(
@@ -350,7 +431,9 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
         action = "auto_merge"
 
     if action == "auto_merge":
-        await link_record_to_breach(session, source_record_id, match.breach_id, match.confidence)
+        await link_record_to_breach(
+            session, source_record_id, match.breach_id, match.confidence, record=record
+        )
         return IngestOutcome(True, False, action, match.breach_id)
 
     if action == "queue_for_review":
@@ -364,6 +447,6 @@ async def ingest_record(session: AsyncSession, source_id: str, record) -> Ingest
         return IngestOutcome(True, False, "stored_unlinked")
 
     new_breach_id = await create_new_breach(session, record)
-    await link_record_to_breach(session, source_record_id, new_breach_id, 1.0)
+    await link_record_to_breach(session, source_record_id, new_breach_id, 1.0, record=record)
     await attach_unlinked_records(session, new_breach_id, record)
     return IngestOutcome(True, False, "new_breach", new_breach_id)

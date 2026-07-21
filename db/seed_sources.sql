@@ -22,7 +22,7 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 ('california_oag',      'California OAG — Data Breach List', 'https://oag.ca.gov/privacy/databreach/list', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', 'Sortable HTML table, paginated server-side'),
 ('vermont_ag',          'Vermont AG — Security Breach Notices', 'https://ago.vermont.gov/focus-areas/data-privacy/security-breach-notices', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
 ('oregon_doj',          'Oregon DOJ — Data Breach Notifications', 'https://justice.oregon.gov/consumer/DataBreach/', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
-('washington_atg',      'Washington AG — Data Breach Notifications', 'https://www.atg.wa.gov/data-breach-notifications', 'state_ag_notification', 'csv', NULL, FALSE, 'scheduled', 'WA publishes an annual breach report CSV/PDF dataset'),
+('washington_atg',      'Washington AG — Data Breach Notifications', 'https://www.atg.wa.gov/data-breach-notifications', 'state_ag_notification', 'json_api', 'https://data.wa.gov/resource/sb4j-ca4h.json', FALSE, 'scheduled', 'WA AG breach notifications via the state''s Socrata open-data API (no key, updated daily)'),
 ('indiana_ag',          'Indiana AG — Data Breach Notifications', 'https://www.in.gov/attorneygeneral/consumer-protection-division/id-theft-prevention/data-breach-notifications', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
 ('montana_doj',         'Montana DOJ — Consumer Data Breach Notices', 'https://dojmt.gov/consumer/data-breach-notices', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
 ('delaware_ag',         'Delaware AG — Security Breach Unit', 'https://attorneygeneral.delaware.gov/fraud/cpu/securitybreach', 'state_ag_notification', 'html_scrape', NULL, FALSE, 'scheduled', NULL),
@@ -44,7 +44,7 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 ('darkreading',       'Dark Reading',               'https://www.darkreading.com',        'security_news', 'rss', 'https://www.darkreading.com/rss.xml', FALSE, 'scheduled', NULL),
 
 -- Breach lookup / dark-web indexing services (on-demand enrichment only — see notes)
-('haveibeenpwned',    'Have I Been Pwned',          'https://haveibeenpwned.com',         'breach_lookup_service', 'json_api', 'https://haveibeenpwned.com/api/v3/breaches', TRUE, 'scheduled', 'The /breaches endpoint IS a legitimate bulk metadata feed (company, date, data classes) with no credential contents — safe to poll on schedule'),
+('haveibeenpwned',    'Have I Been Pwned',          'https://haveibeenpwned.com',         'breach_lookup_service', 'json_api', 'https://haveibeenpwned.com/api/v3/breaches', FALSE, 'scheduled', 'The /breaches metadata endpoint requires NO API key (verified) — bulk breach metadata, no credential contents'),
 ('dehashed',          'DeHashed',                   'https://www.dehashed.com',           'breach_lookup_service', 'json_api', 'https://api.dehashed.com/search', TRUE, 'on_demand_lookup', 'Per-query lookup API. Store ONLY breach-name + date + record-count metadata returned for a queried company/domain. Never persist credential/password fields.'),
 ('intelx',            'Intelligence X',             'https://intelx.io',                  'breach_lookup_service', 'json_api', 'https://2.intelx.io/intelligent/search', TRUE, 'on_demand_lookup', 'Per-query lookup API. Same data-handling restriction as DeHashed above.'),
 
@@ -77,11 +77,11 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 --   * cisa_kev is a vulnerability catalog, not breach data.
 -- ============================================================================
 UPDATE breach_data_sources SET enabled = FALSE WHERE slug IN (
-    'ransom_db', 'maine_ag', 'mass_ag_breaches', 'vermont_ag', 'oregon_doj',
+    'ransom_db', 'maine_ag', 'mass_ag_breaches', 'vermont_ag',
     'indiana_ag', 'montana_doj', 'delaware_ag', 'north_dakota_ag',
     'idtheftcenter', 'privacyrights_breaches', 'enforcementtracker',
     'ic3', 'ico_enforcement', 'edpb', 'sec_cyber_disclosures',
-    'mass_ag_reports', 'leakix_ransomware', 'washington_atg',
+    'mass_ag_reports', 'leakix_ransomware',
     'privacyrights_chronology',
     'bleepingcomputer', 'cisa_kev'
 );
