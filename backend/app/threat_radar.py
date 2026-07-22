@@ -81,7 +81,9 @@ CREATE_INDEXES = [
 ENSURE_PUBLIC_READ = """
 DO $$
 BEGIN
-    EXECUTE 'ALTER TABLE threat_radar ENABLE ROW LEVEL SECURITY';
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.threat_radar'::regclass) THEN
+        EXECUTE 'ALTER TABLE threat_radar ENABLE ROW LEVEL SECURITY';
+    END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies
         WHERE schemaname = 'public' AND tablename = 'threat_radar' AND policyname = 'public read'
@@ -98,7 +100,13 @@ END $$
 """
 
 
+# Must match maintenance.DDL_ADVISORY_LOCK — serializes this schema/RLS DDL
+# against a concurrent maintenance/news-watch run so they can't deadlock.
+DDL_ADVISORY_LOCK = 918273645
+
+
 async def ensure_schema(session) -> None:
+    await session.execute(text("SELECT pg_advisory_xact_lock(CAST(:k AS bigint))"), {"k": DDL_ADVISORY_LOCK})
     await session.execute(text(CREATE_TABLE))
     for stmt in CREATE_INDEXES:
         await session.execute(text(stmt))

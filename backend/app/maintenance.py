@@ -144,7 +144,13 @@ BEGIN
         -- yet on a given database. Skip any table that doesn't exist rather
         -- than aborting the whole heal.
         CONTINUE WHEN to_regclass('public.' || tbl) IS NULL;
-        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+        -- ENABLE RLS takes an AccessExclusiveLock even when RLS is already on,
+        -- so only run it when actually needed — otherwise every 6h pass grabs
+        -- exclusive locks on every table for nothing (and can deadlock against
+        -- a concurrent schema-creating job).
+        IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = to_regclass('public.' || tbl)) THEN
+            EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+        END IF;
         IF NOT EXISTS (
             SELECT 1 FROM pg_policies
             WHERE schemaname = 'public' AND tablename = tbl AND policyname = 'public read'
@@ -550,7 +556,19 @@ async def recompute_denormalized(session) -> None:
     )
 
 
+# A single transaction-level advisory lock shared by every code path that
+# runs grant/RLS/schema DDL (maintenance here, plus news_watch and
+# threat_radar ensure_schema). Acquired BEFORE any table lock, it serializes
+# concurrent DDL runs so an overlapping ingest + news-watch (or a
+# double-dispatch) waits instead of deadlocking on table locks. Value is
+# arbitrary but must match across those modules.
+DDL_ADVISORY_LOCK = 918273645
+
+
 async def ensure_views(session) -> None:
+    # Take the DDL lock first, before CREATE MATERIALIZED VIEW / GRANT / ALTER
+    # below acquire any table locks.
+    await session.execute(text("SELECT pg_advisory_xact_lock(CAST(:k AS bigint))"), {"k": DDL_ADVISORY_LOCK})
     await session.execute(text(PLATFORM_STATS_VIEW))
     await session.execute(text(REFRESH_FUNCTION))
     await session.execute(text(GRANT_STATS_VIEW))
