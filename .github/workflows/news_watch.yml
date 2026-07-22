@@ -1,0 +1,37 @@
+name: News watch (daily title correlation)
+
+# Pulls ONLY headline titles + URLs from a few security-news outlets, keeps
+# them ~7 days, and correlates them by company name against ledger breaches to
+# surface "Related news coverage" in each dossier. Never creates or edits a
+# breach — see backend/app/news_watch.py.
+
+on:
+  schedule:
+    - cron: '20 6 * * *'   # once a day, 06:20 UTC (offset from the 6h ingest)
+  workflow_dispatch: {}
+
+jobs:
+  news-watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Read-only job; don't leave GITHUB_TOKEN persisted in .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Pull headlines, correlate, prune
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m app.news_watch

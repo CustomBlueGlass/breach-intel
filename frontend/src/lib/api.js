@@ -128,9 +128,27 @@ export async function fetchBreachDetail(id) {
     }
   }
 
+  // Related news coverage: headlines the daily news-watch job correlated to
+  // this breach by company name (title + URL only, never article content).
+  // Best-effort — an older database without the news_watch table just yields
+  // an empty list rather than failing the whole panel.
+  let related_news = [];
+  try {
+    const { data: news } = await supabase
+      .from('news_watch')
+      .select('title, url, source_name, published_at, similarity')
+      .eq('matched_breach_id', id)
+      .order('published_at', { ascending: false, nullsFirst: false })
+      .limit(25);
+    related_news = news || [];
+  } catch {
+    related_news = [];
+  }
+
   return {
     breach,
     evidence,
+    related_news,
     linked_sources: (sources || []).map((s) => ({
       source_name: s.breach_data_sources?.name,
       source_category: s.breach_data_sources?.category,

@@ -3,6 +3,7 @@ import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
   FileText, ExternalLink, Download, Copy, Link2, Check, Archive, ShieldCheck,
+  Newspaper,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -783,6 +784,41 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
             </div>
             <div className="mt-2 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
               Screenshots are hotlinked from the source tracker (not re-hosted) as evidence of the leak-site claim.
+            </div>
+          </div>
+        )}
+
+        {(breach.related_news || []).length > 0 && (
+          <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Newspaper size={14} color={COLORS.boneFaint} />
+              <span className="text-xs uppercase tracking-widest" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+                Related news coverage
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {breach.related_news.map((n, i) => (
+                <a key={i} href={n.url} target="_blank" rel="noopener noreferrer"
+                   className="group flex items-start gap-2.5 rounded-md px-2.5 py-2 hover:underline"
+                   style={{ border: `1px solid ${COLORS.line}` }}
+                   title="Opens the outlet's article in a new tab">
+                  <ExternalLink size={13} color={COLORS.boneFaint} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>
+                      {n.title}
+                    </span>
+                    <span className="block text-xs mt-0.5" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>
+                      {[n.source_name, n.published_at ? fmtDate(n.published_at) : null,
+                        n.similarity != null ? `${Math.round(n.similarity * 100)}% name match` : null]
+                        .filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                </a>
+              ))}
+            </div>
+            <div className="mt-2 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
+              Headlines auto-correlated to this company by name within a 7-day window — links out to the
+              outlet, not evidence of the breach itself.
             </div>
           </div>
         )}

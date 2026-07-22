@@ -105,7 +105,8 @@ export default function App() {
     setDetailError(null);
     window.history.replaceState(null, '', `#breach=${b.id}`);
     fetchBreachDetail(b.id)
-      .then(({ breach, linked_sources, evidence }) => setDetail({ ...breach, linked_sources, evidence }))
+      .then(({ breach, linked_sources, evidence, related_news }) =>
+        setDetail({ ...breach, linked_sources, evidence, related_news }))
       .catch((e) => {
         console.error('fetchBreachDetail', e);
         setDetailError(e?.message || String(e));
