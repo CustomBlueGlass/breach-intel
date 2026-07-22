@@ -181,11 +181,11 @@ export function Hero({ recent, totalSources, totalBreaches }) {
           style={{ fontFamily: FONT_DISPLAY, color: COLORS.bone, fontSize: 'clamp(28px,4vw,44px)', lineHeight: 1.1, fontWeight: 600 }}
         >
           Every leak claim, every notice,
-          <br />every filing — one record.
+          <br />every filing. One record.
         </h1>
         <p className="mt-5 max-w-md text-sm leading-relaxed" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
-          {totalSources} sources — ransomware leak sites, state AG portals, federal regulators, and security press —
-          pulled in every six hours, deduplicated, and combined into one detailed record per company breach.
+          {totalSources} sources: ransomware leak sites, state AG portals, federal regulators, and security press.
+          Pulled in every six hours, deduplicated, and combined into one detailed record per company breach.
         </p>
         <div className="flex items-center gap-6 mt-7">
           <div>
@@ -217,7 +217,7 @@ export function Hero({ recent, totalSources, totalBreaches }) {
             <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: COLORS.teal }} />
           </span>
           <span className="text-xs uppercase tracking-widest" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.14em' }}>
-            Intake — last 6h
+            Intake · last 6h
           </span>
         </div>
         <div className="space-y-3">
@@ -378,7 +378,7 @@ export function LedgerRow({ b, onOpen, onActorClick }) {
           {[
             INDUSTRY_LABELS[b.industry] || b.industry,
             [b.region_state, b.country].filter(Boolean).join(', '),
-          ].filter(Boolean).join(' · ') || '—'}
+          ].filter(Boolean).join(' · ') || '-'}
         </div>
       </td>
       <td className="px-4 py-3 text-sm">
@@ -401,8 +401,8 @@ export function LedgerRow({ b, onOpen, onActorClick }) {
       <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>
         {b.disclosed_date ? fmtDate(b.disclosed_date) : (
           b.incident_date
-            ? <span title="No separate disclosure date on record — showing incident date" style={{ color: COLORS.boneFaint }}>~{fmtDate(b.incident_date)}</span>
-            : '—'
+            ? <span title="No separate disclosure date on record; showing incident date" style={{ color: COLORS.boneFaint }}>~{fmtDate(b.incident_date)}</span>
+            : '-'
         )}
       </td>
       <td className="px-4 py-3 text-sm text-right whitespace-nowrap" style={{ fontFamily: FONT_MONO }}>
@@ -441,7 +441,7 @@ export function LedgerCard({ b, onOpen, onActorClick }) {
         <div className="min-w-0">
           <div className="text-sm font-medium truncate" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>{b.canonical_name}</div>
           <div className="text-xs truncate" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>
-            {[INDUSTRY_LABELS[b.industry] || b.industry, [b.region_state, b.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '—'}
+            {[INDUSTRY_LABELS[b.industry] || b.industry, [b.region_state, b.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '-'}
           </div>
         </div>
         <SeverityTag severity={b.severity} />
@@ -456,7 +456,7 @@ export function LedgerCard({ b, onOpen, onActorClick }) {
             {b.ransomware_group}
           </span>
         ) : <span style={{ color: COLORS.boneFaint }}>Unattributed</span>}
-        <span>{b.disclosed_date ? fmtDate(b.disclosed_date) : (b.incident_date ? `~${fmtDate(b.incident_date)}` : '—')}</span>
+        <span>{b.disclosed_date ? fmtDate(b.disclosed_date) : (b.incident_date ? `~${fmtDate(b.incident_date)}` : '-')}</span>
         <span>{b.records_affected_est != null ? `${fmtNumber(b.records_affected_est)} recs` : 'undisclosed'}</span>
         <span style={{ color: COLORS.boneFaint }}>{b.source_count} src</span>
       </div>
@@ -530,7 +530,7 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
       )}
       <div className="flex items-center justify-between px-6 py-4" style={{ borderTop: `1px solid ${COLORS.line}` }}>
         <span className="text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}>
-          Showing {total === 0 ? 0 : startIdx}–{endIdx} of {total} — never the full dataset
+          Showing {total === 0 ? 0 : startIdx} to {endIdx} of {total} · never the full dataset
         </span>
         <div className="flex items-center gap-1">
           <button
@@ -561,9 +561,9 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
 /* ----------------------------- detail drawer ------------------------------ */
 
 function disclosureLag(incident, disclosed) {
-  if (!incident || !disclosed) return '—';
+  if (!incident || !disclosed) return '-';
   const days = Math.round((new Date(disclosed + 'T00:00:00') - new Date(incident + 'T00:00:00')) / 86400000);
-  if (Number.isNaN(days)) return '—';
+  if (Number.isNaN(days)) return '-';
   if (days <= 0) return 'same day';
   return `${days} day${days === 1 ? '' : 's'}`;
 }
@@ -571,7 +571,7 @@ function disclosureLag(incident, disclosed) {
 // Researcher tool: one-click plain-text case summary for notes / reports.
 function breachReportText(breach) {
   const lines = [
-    `# ${breach.canonical_name} — breach summary`,
+    `# ${breach.canonical_name}: breach summary`,
     '',
     `Incident date:      ${breach.incident_date || 'unknown'}`,
     `Publicly disclosed: ${breach.disclosed_date || 'unknown'}`,
@@ -627,8 +627,8 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
                 Couldn't load breach details: {error}
               </span>
               <span style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY, fontSize: 12 }}>
-                If this keeps happening, the database's public read access may be missing —
-                it is re-applied automatically on the next ingestion run, or run
+                If this keeps happening, the database's public read access may be missing.
+                It is re-applied automatically on the next ingestion run, or run
                 db/supabase_grants.sql manually.
               </span>
               <button onClick={onClose} className="mt-2 px-3 py-1.5 rounded-md text-sm" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.boneDim, fontFamily: FONT_BODY }}>
@@ -669,7 +669,7 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
               return (
                 <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs" style={{ fontFamily: FONT_MONO, color: multi ? COLORS.teal : COLORS.boneFaint }}>
                   <ShieldCheck size={12} />
-                  {multi ? `Corroborated by ${n} independent sources` : 'Single-source — awaiting corroboration'}
+                  {multi ? `Corroborated by ${n} independent sources` : 'Single-source, awaiting corroboration'}
                 </div>
               );
             })()}
@@ -682,7 +682,7 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
         <div className="flex flex-wrap items-center gap-2 px-6 py-4" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
           <SeverityTag severity={breach.severity} />
           {breach.severity && (
-            <span className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }} title="Severity is estimated from record volume, data sensitivity, and threat-actor attribution — not analyst-assigned.">
+            <span className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }} title="Severity is estimated from record volume, data sensitivity, and threat-actor attribution, not analyst-assigned.">
               (estimated)
             </span>
           )}
@@ -714,10 +714,10 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
             ['Time to disclosure', disclosureLag(breach.incident_date, breach.disclosed_date)],
             ['Threat actor', breach.ransomware_group || 'Unattributed'],
             ['Records affected (est.)', fmtNumber(breach.records_affected_est)],
-            ['Location', [breach.region_state, breach.country].filter(Boolean).join(', ') || '—'],
+            ['Location', [breach.region_state, breach.country].filter(Boolean).join(', ') || '-'],
             ['Status', (breach.status || 'confirmed').replace(/^./, (c) => c.toUpperCase())],
             ['Correlated sources', breach.source_count],
-            ['Avg. match confidence', breach.confidence_avg != null ? `${Math.round(breach.confidence_avg * 100)}%` : '—'],
+            ['Avg. match confidence', breach.confidence_avg != null ? `${Math.round(breach.confidence_avg * 100)}%` : '-'],
           ].map(([label, val]) => (
             <div key={label}>
               <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>{label}</div>
@@ -817,7 +817,7 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
               ))}
             </div>
             <div className="mt-2 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
-              Headlines auto-correlated to this company by name within a 7-day window — links out to the
+              Headlines auto-correlated to this company by name within a 7-day window. Links out to the
               outlet, not evidence of the breach itself.
             </div>
           </div>
@@ -963,7 +963,7 @@ export function MatchQueueView({ items }) {
       {items.length === 0 && (
         <div className="flex flex-col items-center py-16 gap-2">
           <CheckCircle2 size={28} color={COLORS.teal} />
-          <p style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }} className="text-sm">Queue is empty — nothing pending review.</p>
+          <p style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }} className="text-sm">Queue is empty. Nothing pending review.</p>
         </div>
       )}
       <div className="space-y-3">
@@ -988,7 +988,7 @@ export function MatchQueueView({ items }) {
               >
                 {item.confidence}% confidence
               </span>
-              <span title="This is a public, read-only view — review actions require an authenticated analyst session." className="p-1.5 rounded-md flex items-center gap-1" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.boneFaint }}>
+              <span title="This is a public, read-only view. Review actions require an authenticated analyst session." className="p-1.5 rounded-md flex items-center gap-1" style={{ border: `1px solid ${COLORS.line}`, color: COLORS.boneFaint }}>
                 <Lock size={13} />
                 <span className="text-xs" style={{ fontFamily: FONT_MONO }}>read-only</span>
               </span>

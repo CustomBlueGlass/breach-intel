@@ -228,7 +228,7 @@ function EnrichmentLaunchpad() {
   const clean = refang(value.trim());
   const links = type ? PIVOTS[type](clean) : [];
   return (
-    <ToolCard title="Enrichment launchpad" subtitle="Paste any indicator (IP, domain, URL, hash, email, CVE, or actor name). One click pivots to the right free tool — no more retyping into six tabs.">
+    <ToolCard title="Enrichment launchpad" subtitle="Paste any indicator (IP, domain, URL, hash, email, CVE, or actor name). One click pivots to the right free tool, so no more retyping into six tabs.">
       <input
         value={value} onChange={(e) => setValue(e.target.value)}
         placeholder="8.8.8.8 · evil[.]com · <sha256> · CVE-2024-3400 · LockBit"
@@ -299,7 +299,7 @@ function JwtTool() {
   }
   const claim = (k) => (payload && payload[k] != null ? new Date(payload[k] * 1000).toISOString() : null);
   return (
-    <ToolCard title="JWT decoder" subtitle="Decodes header & claims (does NOT verify the signature — never paste production secrets).">
+    <ToolCard title="JWT decoder" subtitle="Decodes header & claims (does NOT verify the signature, so never paste production secrets).">
       <textarea value={token} onChange={(e) => setToken(e.target.value)} rows={3}
         placeholder="eyJhbGciOi…" className="w-full text-sm rounded-md px-3 py-2 outline-none resize-y break-all" style={inputStyle} />
       {err && <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.red }}>{err}</div>}
@@ -402,9 +402,9 @@ function shannonEntropy(str) {
 function EntropyTool() {
   const [text, setText] = useState('');
   const e = shannonEntropy(text);
-  const verdict = !text ? '' : e > 4.2 ? 'high — looks random/encoded (DGA, packed, ciphertext)' : e > 3 ? 'moderate' : 'low — looks like natural text';
+  const verdict = !text ? '' : e > 4.2 ? 'high: looks random/encoded (DGA, packed, ciphertext)' : e > 3 ? 'moderate' : 'low: looks like natural text';
   return (
-    <ToolCard title="Shannon entropy" subtitle="Score a string's randomness — flag DGA domains, packed strings, or encoded blobs.">
+    <ToolCard title="Shannon entropy" subtitle="Score a string's randomness to flag DGA domains, packed strings, or encoded blobs.">
       <input value={text} onChange={(e2) => setText(e2.target.value)} placeholder="kq3v9z7x2p.com"
         className="w-full text-sm rounded-md px-3 py-2 outline-none" style={inputStyle} />
       {text && (
@@ -540,7 +540,7 @@ export function ToolsView() {
       </div>
       <p className="text-sm mb-5 max-w-2xl" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
         Free, browser-only utilities so you don't have to leave the platform for the small pivots.
-        Everything here runs locally — no input is uploaded or logged.
+        Everything here runs locally. No input is uploaded or logged.
       </p>
       <div className="grid gap-4 md:grid-cols-2">
         <EnrichmentLaunchpad />

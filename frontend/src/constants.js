@@ -71,7 +71,7 @@ export const SEVERITY_META = {
 };
 
 export function fmtNumber(n) {
-  if (n == null) return '—';
+  if (n == null) return '-';
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
   if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
   return String(n);
@@ -88,13 +88,13 @@ function toDate(d) {
 
 export function fmtDate(d) {
   const dt = toDate(d);
-  if (!dt) return '—';
+  if (!dt) return '-';
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export function fmtDateTime(d) {
   const dt = toDate(d);
-  if (!dt) return '—';
+  if (!dt) return '-';
   const hasTime = String(d).includes('T');
   const date = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   if (!hasTime) return date;
@@ -109,7 +109,7 @@ export function daysAgo(d) {
 
 export function relativeTime(d) {
   const days = daysAgo(d);
-  if (days == null) return '—';
+  if (days == null) return '-';
   if (days <= 0) return 'today';
   if (days === 1) return 'yesterday';
   if (days < 7) return `${days}d ago`;
