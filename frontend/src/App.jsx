@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useGoogleFonts, COLORS } from './constants';
 import {
   TopBar, Hero, FilterBar, LedgerTable, BreachDetailDrawer,
@@ -64,6 +64,11 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [radar, setRadar] = useState([]);
 
+  // Anchor at the top of the results so paging can scroll back up to it,
+  // instead of leaving the user stranded at the bottom where the pager is.
+  const resultsTopRef = useRef(null);
+  const firstLedgerRender = useRef(true);
+
   // One-time data: hero stats, intake ticker, filter dropdown options.
   useEffect(() => {
     fetchStats().then(setStats).catch((e) => console.error('fetchStats', e));
@@ -88,6 +93,14 @@ export default function App() {
 
   useEffect(() => { loadLedger(); }, [loadLedger]);
   useEffect(() => { setPage(1); }, [filters, sortBy, sortDir]);
+
+  // On a page change (Next/Prev), scroll back to the top of the results so the
+  // new page starts at the top rather than wherever the pager sits. Skips the
+  // initial mount so we don't yank a freshly loaded page around.
+  useEffect(() => {
+    if (firstLedgerRender.current) { firstLedgerRender.current = false; return; }
+    resultsTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [page]);
 
   // Analytics tab: load lazily, once, when first opened.
   useEffect(() => {
@@ -176,6 +189,7 @@ export default function App() {
             totalSources={stats?.total_sources ?? '-'}
             totalBreaches={stats?.total_breaches ?? '-'}
           />
+          <div ref={resultsTopRef} style={{ scrollMarginTop: 64 }} />
           <FilterBar
             filters={filters} setFilters={setFilters}
             sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir}

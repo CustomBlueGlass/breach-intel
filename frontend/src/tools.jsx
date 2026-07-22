@@ -529,6 +529,205 @@ function CvssTool() {
   );
 }
 
+/* --------------------------- CIDR / subnet calc --------------------------- */
+
+function ipToInt(ip) {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const oct of parts) {
+    if (!/^\d{1,3}$/.test(oct)) return null;
+    const v = Number(oct);
+    if (v > 255) return null;
+    n = n * 256 + v;
+  }
+  return n >>> 0;
+}
+function intToIp(n) {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
+}
+
+function CidrTool() {
+  const [val, setVal] = useState('');
+  const [testIp, setTestIp] = useState('');
+  const info = useMemo(() => {
+    const s = val.trim();
+    if (!s) return null;
+    let ipStr = s, prefix = 32;
+    if (s.includes('/')) { const [a, b] = s.split('/'); ipStr = a; prefix = Number(b); }
+    const base = ipToInt(ipStr);
+    if (base === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return { error: true };
+    const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0;
+    const network = (base & mask) >>> 0;
+    const broadcast = (network | (~mask >>> 0)) >>> 0;
+    const total = Math.pow(2, 32 - prefix);
+    return {
+      prefix,
+      netmask: intToIp(mask),
+      wildcard: intToIp(~mask >>> 0),
+      network: intToIp(network),
+      broadcast: intToIp(broadcast),
+      firstHost: intToIp(prefix >= 31 ? network : (network + 1) >>> 0),
+      lastHost: intToIp(prefix >= 31 ? broadcast : (broadcast - 1) >>> 0),
+      total,
+      usable: prefix >= 31 ? total : Math.max(total - 2, 0),
+      _net: network, _bcast: broadcast,
+    };
+  }, [val]);
+  const contains = useMemo(() => {
+    if (!info || info.error || !testIp.trim()) return null;
+    const t = ipToInt(testIp.trim());
+    if (t === null) return null;
+    return t >= info._net && t <= info._bcast;
+  }, [info, testIp]);
+  return (
+    <ToolCard title="CIDR / subnet calculator" subtitle="Expand an IPv4 CIDR to its range, mask, and host count, and test whether an address falls inside it. Handy for scoping and blocklists.">
+      <input value={val} onChange={(e) => setVal(e.target.value)} placeholder="10.0.0.0/24  ·  192.168.1.50/26"
+        className="w-full text-sm rounded-md px-3 py-2 outline-none" style={inputStyle} />
+      {info && info.error && <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.red }}>not a valid IPv4 CIDR</div>}
+      {info && !info.error && (
+        <div className="mt-2">
+          <Field label="Network" value={`${info.network}/${info.prefix}`} />
+          <Field label="Netmask" value={info.netmask} />
+          <Field label="Wildcard" value={info.wildcard} />
+          <Field label="Broadcast" value={info.broadcast} />
+          <Field label="Host range" value={`${info.firstHost} to ${info.lastHost}`} />
+          <Field label="Total addresses" value={info.total.toLocaleString()} />
+          <Field label="Usable hosts" value={info.usable.toLocaleString()} />
+          <div className="mt-3">
+            <div className="text-xs mb-1" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Contains address?</div>
+            <input value={testIp} onChange={(e) => setTestIp(e.target.value)} placeholder="10.0.0.42"
+              className="w-full text-sm rounded-md px-3 py-2 outline-none" style={inputStyle} />
+            {testIp.trim() && (
+              <div className="mt-1 text-xs" style={{ ...mono, color: contains == null ? COLORS.red : contains ? COLORS.teal : COLORS.amber }}>
+                {contains == null ? 'not a valid address' : contains ? 'in range ✓' : 'outside range ✗'}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </ToolCard>
+  );
+}
+
+/* --------------------------- Hash identifier ------------------------------ */
+
+function identifyHash(raw) {
+  const s = raw.trim();
+  if (!s) return null;
+  const prefixed = [
+    [/^\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}$/, 'bcrypt'],
+    [/^\$argon2(id|i|d)\$/, 'Argon2'],
+    [/^\$6\$/, 'sha512crypt ($6$)'],
+    [/^\$5\$/, 'sha256crypt ($5$)'],
+    [/^\$1\$/, 'md5crypt ($1$)'],
+    [/^\$y\$/, 'yescrypt'],
+    [/^\{SSHA\}/i, 'SSHA (LDAP)'],
+    [/^\{SHA\}/i, 'SHA-1 (LDAP)'],
+    [/^[0-9a-f]{32}:[0-9a-f]{1,}$/i, 'MD5 / NTLM with salt'],
+  ];
+  for (const [re, name] of prefixed) if (re.test(s)) return { candidates: [name] };
+  if (!/^[0-9a-fA-F]+$/.test(s)) return { candidates: [] };
+  const byLen = {
+    8: ['CRC-32', 'Adler-32'],
+    16: ['CRC-64', 'MySQL 3.23'],
+    32: ['MD5', 'NTLM', 'MD4', 'LM'],
+    40: ['SHA-1', 'RIPEMD-160', 'MySQL 4.1+'],
+    56: ['SHA-224', 'SHA3-224'],
+    64: ['SHA-256', 'SHA3-256', 'BLAKE2s', 'RIPEMD-256'],
+    96: ['SHA-384', 'SHA3-384'],
+    128: ['SHA-512', 'SHA3-512', 'BLAKE2b', 'Whirlpool'],
+  };
+  return { len: s.length, candidates: byLen[s.length] || [] };
+}
+
+function HashIdTool() {
+  const [val, setVal] = useState('');
+  const res = useMemo(() => identifyHash(val), [val]);
+  return (
+    <ToolCard title="Hash identifier" subtitle="Guess a hash's algorithm from its length and format (MD5, SHA family, NTLM, bcrypt, crypt schemes). Pairs with the IOC extractor.">
+      <textarea value={val} onChange={(e) => setVal(e.target.value)} rows={2}
+        placeholder="Paste a hash…" className="w-full text-sm rounded-md px-3 py-2 outline-none resize-y break-all" style={inputStyle} />
+      {res && (
+        <div className="mt-2">
+          {res.len && <div className="text-xs mb-1" style={{ ...mono, color: COLORS.boneFaint }}>{res.len} hex chars</div>}
+          {res.candidates.length === 0 ? (
+            <div className="text-xs" style={{ ...mono, color: COLORS.boneFaint }}>no known format matches</div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {res.candidates.map((c, i) => (
+                <span key={c} className="text-xs px-2 py-0.5 rounded" style={{ ...mono, color: i === 0 ? COLORS.teal : COLORS.amberSoft, backgroundColor: COLORS.ink, border: `1px solid ${COLORS.line}` }}>{c}</span>
+              ))}
+            </div>
+          )}
+          {res.candidates.length > 1 && <div className="mt-1 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Length is ambiguous, most likely first.</div>}
+        </div>
+      )}
+    </ToolCard>
+  );
+}
+
+/* ------------------------------ URL dissector ----------------------------- */
+
+function UrlTool() {
+  const [val, setVal] = useState('');
+  const info = useMemo(() => {
+    const raw = refang(val.trim());
+    if (!raw) return null;
+    let u;
+    try { u = new URL(raw); } catch { try { u = new URL('http://' + raw); } catch { return { error: true }; } }
+    let params = [];
+    try { params = [...u.searchParams.entries()]; } catch { /* noop */ }
+    const flags = [];
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(u.hostname)) flags.push('Host is a raw IP address');
+    if (u.hostname.split('.').some((l) => l.startsWith('xn--'))) flags.push('Punycode/IDN host (possible homograph)');
+    if (u.username || u.password) flags.push('Embedded credentials in userinfo (@)');
+    if (u.port && !['80', '443', ''].includes(u.port)) flags.push(`Non-standard port ${u.port}`);
+    if (!['http:', 'https:'].includes(u.protocol)) flags.push(`Unusual scheme ${u.protocol}`);
+    if (u.hostname.split('.').length > 4) flags.push('Deeply nested subdomains');
+    if (/%[0-9a-fA-F]{2}/.test(u.pathname + u.search)) flags.push('Percent-encoded characters');
+    let decodedPath = u.pathname;
+    try { decodedPath = decodeURIComponent(u.pathname); } catch { /* keep raw */ }
+    return { u, params, flags, decodedPath };
+  }, [val]);
+  return (
+    <ToolCard title="URL dissector" subtitle="Break a URL into its parts, decode the query string, and flag phishing/C2 traits (raw-IP host, punycode, embedded creds, odd ports). Defanged input is accepted.">
+      <textarea value={val} onChange={(e) => setVal(e.target.value)} rows={2}
+        placeholder="hxxps://user@evil[.]com:8443/login?next=%2Fadmin" className="w-full text-sm rounded-md px-3 py-2 outline-none resize-y break-all" style={inputStyle} />
+      {info && info.error && <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.red }}>could not parse as a URL</div>}
+      {info && !info.error && (
+        <div className="mt-2">
+          {info.flags.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {info.flags.map((f) => (
+                <span key={f} className="text-xs px-2 py-0.5 rounded" style={{ ...mono, color: COLORS.amber, backgroundColor: 'rgba(217,142,51,0.10)', border: `1px solid ${COLORS.line}` }}>{f}</span>
+              ))}
+            </div>
+          )}
+          <Field label="Scheme" value={info.u.protocol.replace(':', '')} />
+          <Field label="Host" value={info.u.hostname} />
+          {info.u.port && <Field label="Port" value={info.u.port} />}
+          {(info.u.username || info.u.password) && <Field label="Userinfo" value={`${info.u.username}${info.u.password ? ':' + info.u.password : ''}`} />}
+          <Field label="Path" value={info.decodedPath || '/'} />
+          {info.u.hash && <Field label="Fragment" value={info.u.hash} />}
+          {info.params.length > 0 && (
+            <div className="mt-2">
+              <div className="text-xs mb-1" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Query parameters</div>
+              {info.params.map(([k, v], i) => (
+                <Field key={i} label={k} value={v || '(empty)'} />
+              ))}
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-xs break-all" style={{ ...mono, color: COLORS.boneFaint }}>{defang(info.u.href)}</span>
+            <CopyBtn text={defang(info.u.href)} small />
+          </div>
+        </div>
+      )}
+    </ToolCard>
+  );
+}
+
 /* --------------------------------- View ----------------------------------- */
 
 export function ToolsView() {
@@ -545,7 +744,10 @@ export function ToolsView() {
       <div className="grid gap-4 md:grid-cols-2">
         <EnrichmentLaunchpad />
         <IocExtractor />
+        <UrlTool />
+        <CidrTool />
         <HashTool />
+        <HashIdTool />
         <Base64Tool />
         <JwtTool />
         <TimestampTool />
