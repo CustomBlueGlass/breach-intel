@@ -218,6 +218,29 @@ CREATE INDEX IF NOT EXISTS idx_news_watch_first_seen ON news_watch (first_seen);
 CREATE INDEX IF NOT EXISTS idx_news_watch_title_hash ON news_watch (title_hash);
 CREATE INDEX IF NOT EXISTS idx_news_watch_org_trgm ON news_watch USING gin (org_norm gin_trgm_ops);
 
+-- ----------------------------------------------------------------------------
+-- 9. Threat Radar — fresh threat signals behind the site's live ticker
+-- ----------------------------------------------------------------------------
+-- Compact "what's happening now" rows (latest ransomware victims, newly
+-- exploited CVEs, etc.) pulled server-side from public feeds. Read-only decor
+-- for researchers; NEVER a breach source. See backend/app/threat_radar.py.
+CREATE TABLE IF NOT EXISTS threat_radar (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind         TEXT NOT NULL,          -- ransomware_victim | kev_cve | otx_pulse | malware_url
+    source_slug  TEXT NOT NULL,
+    source_name  TEXT NOT NULL,
+    external_id  TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    subtitle     TEXT,
+    url          TEXT,
+    published_at TIMESTAMPTZ,
+    first_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source_slug, external_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_threat_radar_published ON threat_radar (published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threat_radar_first_seen ON threat_radar (first_seen);
+
 -- ============================================================================
 -- Indexes
 -- ============================================================================

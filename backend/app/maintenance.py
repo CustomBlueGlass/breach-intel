@@ -125,7 +125,7 @@ END $$
 PUBLIC_READ_TABLES = [
     "breaches", "breach_companies", "breach_source_records",
     "breach_match_queue", "breach_data_sources", "breach_collector_log",
-    "threat_actors", "news_watch",
+    "threat_actors", "news_watch", "threat_radar",
 ]
 PUBLIC_READ_VIEWS = [
     "mv_breach_ledger", "mv_breach_trends", "mv_top_ransomware_groups",

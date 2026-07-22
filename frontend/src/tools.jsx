@@ -161,17 +161,29 @@ function detectIndicatorType(v) {
   return 'keyword';
 }
 
+// All links are keyless deep-links into each engine's own UI (pre-filled with
+// the indicator). No API keys — a public site can't safely hold them — and no
+// cross-origin fetch, so nothing here can break on CORS. This is the correct
+// way to "add" the big threat-intel APIs (VirusTotal, OTX, Shodan, GreyNoise,
+// AbuseIPDB, Pulsedive, ThreatMiner, URLhaus, IntelX, HIBP…) to a keyless site.
 const PIVOTS = {
   ip: (v) => [
     ['VirusTotal', `https://www.virustotal.com/gui/ip-address/${v}`],
-    ['Shodan', `https://www.shodan.io/host/${v}`],
-    ['GreyNoise', `https://viz.greynoise.io/ip/${v}`],
     ['AbuseIPDB', `https://www.abuseipdb.com/check/${v}`],
+    ['GreyNoise', `https://viz.greynoise.io/ip/${v}`],
+    ['Shodan', `https://www.shodan.io/host/${v}`],
+    ['AlienVault OTX', `https://otx.alienvault.com/indicator/ip/${v}`],
+    ['Pulsedive', `https://pulsedive.com/indicator/?ioc=${encodeURIComponent(v)}`],
+    ['ThreatMiner', `https://www.threatminer.org/host.php?q=${v}`],
     ['Censys', `https://search.censys.io/hosts/${v}`],
     ['urlscan', `https://urlscan.io/search/#${encodeURIComponent(v)}`],
   ],
   domain: (v) => [
     ['VirusTotal', `https://www.virustotal.com/gui/domain/${v}`],
+    ['AlienVault OTX', `https://otx.alienvault.com/indicator/domain/${v}`],
+    ['Pulsedive', `https://pulsedive.com/indicator/?ioc=${encodeURIComponent(v)}`],
+    ['URLhaus', `https://urlhaus.abuse.ch/browse.php?search=${encodeURIComponent(v)}`],
+    ['ThreatMiner', `https://www.threatminer.org/domain.php?q=${v}`],
     ['urlscan', `https://urlscan.io/domain/${v}`],
     ['crt.sh', `https://crt.sh/?q=${encodeURIComponent(v)}`],
     ['Shodan', `https://www.shodan.io/search?query=${encodeURIComponent('hostname:' + v)}`],
@@ -180,13 +192,16 @@ const PIVOTS = {
   ],
   url: (v) => [
     ['VirusTotal', `https://www.virustotal.com/gui/search/${encodeURIComponent(v)}`],
+    ['URLhaus', `https://urlhaus.abuse.ch/browse.php?search=${encodeURIComponent(v)}`],
     ['urlscan', `https://urlscan.io/search/#${encodeURIComponent(v)}`],
     ['Web Archive', `https://web.archive.org/web/2/${v}`],
   ],
   hash: (v) => [
     ['VirusTotal', `https://www.virustotal.com/gui/file/${v}`],
+    ['AlienVault OTX', `https://otx.alienvault.com/indicator/file/${v}`],
     ['MalwareBazaar', `https://bazaar.abuse.ch/browse.php?search=${v}`],
     ['ThreatFox', `https://threatfox.abuse.ch/browse.php?search=ioc%3A${v}`],
+    ['ThreatMiner', `https://www.threatminer.org/sample.php?q=${v}`],
   ],
   email: (v) => [
     ['Have I Been Pwned', `https://haveibeenpwned.com/account/${encodeURIComponent(v)}`],
@@ -201,6 +216,7 @@ const PIVOTS = {
   ],
   keyword: (v) => [
     ['ransomware.live', `https://www.ransomware.live/#/search?search=${encodeURIComponent(v)}`],
+    ['AlienVault OTX', `https://otx.alienvault.com/browse/global/pulses?q=${encodeURIComponent(v)}`],
     ['MITRE ATT&CK', `https://attack.mitre.org/groups/`],
     ['Google', `https://www.google.com/search?q=${encodeURIComponent(v)}`],
   ],

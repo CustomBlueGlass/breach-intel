@@ -43,3 +43,13 @@ jobs:
           LEAKIX_API_KEY: ${{ secrets.LEAKIX_API_KEY }}
           HIBP_API_KEY: ${{ secrets.HIBP_API_KEY }}
         run: python -m app.scheduler
+
+      - name: Refresh threat-radar ticker (latest ransomware victims + CISA KEV)
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Optional — the ticker adds OTX pulses / URLhaus rows only when
+          # these free-tier keys are present; otherwise it runs keyless.
+          OTX_API_KEY: ${{ secrets.OTX_API_KEY }}
+          URLHAUS_AUTH_KEY: ${{ secrets.URLHAUS_AUTH_KEY }}
+        run: python -m app.threat_radar

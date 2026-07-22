@@ -161,6 +161,22 @@ export async function fetchBreachDetail(id) {
   };
 }
 
+// Live "Threat Radar" ticker: fresh signals (latest ransomware victims, newly
+// exploited CVEs, optional OTX/URLhaus) written server-side by app.threat_radar.
+// Best-effort — a database without the table just yields an empty ticker.
+export async function fetchThreatRadar(limit = 40) {
+  try {
+    const { data } = await supabase
+      .from('threat_radar')
+      .select('kind, source_name, title, subtitle, url, published_at')
+      .order('published_at', { ascending: false, nullsFirst: false })
+      .limit(limit);
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchTrends() {
   const { data, error } = await supabase
     .from('mv_breach_trends')
