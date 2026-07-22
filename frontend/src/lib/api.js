@@ -128,9 +128,27 @@ export async function fetchBreachDetail(id) {
     }
   }
 
+  // Related news coverage: headlines the daily news-watch job correlated to
+  // this breach by company name (title + URL only, never article content).
+  // Best-effort — an older database without the news_watch table just yields
+  // an empty list rather than failing the whole panel.
+  let related_news = [];
+  try {
+    const { data: news } = await supabase
+      .from('news_watch')
+      .select('title, url, source_name, published_at, similarity')
+      .eq('matched_breach_id', id)
+      .order('published_at', { ascending: false, nullsFirst: false })
+      .limit(25);
+    related_news = news || [];
+  } catch {
+    related_news = [];
+  }
+
   return {
     breach,
     evidence,
+    related_news,
     linked_sources: (sources || []).map((s) => ({
       source_name: s.breach_data_sources?.name,
       source_category: s.breach_data_sources?.category,
@@ -141,6 +159,22 @@ export async function fetchBreachDetail(id) {
       summary: s.summary,
     })),
   };
+}
+
+// Live "Threat Radar" ticker: fresh signals (latest ransomware victims, newly
+// exploited CVEs, optional OTX/URLhaus) written server-side by app.threat_radar.
+// Best-effort — a database without the table just yields an empty ticker.
+export async function fetchThreatRadar(limit = 40) {
+  try {
+    const { data } = await supabase
+      .from('threat_radar')
+      .select('kind, source_name, title, subtitle, url, published_at')
+      .order('published_at', { ascending: false, nullsFirst: false })
+      .limit(limit);
+    return data || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchTrends() {

@@ -125,7 +125,7 @@ END $$
 PUBLIC_READ_TABLES = [
     "breaches", "breach_companies", "breach_source_records",
     "breach_match_queue", "breach_data_sources", "breach_collector_log",
-    "threat_actors",
+    "threat_actors", "news_watch", "threat_radar",
 ]
 PUBLIC_READ_VIEWS = [
     "mv_breach_ledger", "mv_breach_trends", "mv_top_ransomware_groups",
@@ -140,6 +140,10 @@ DECLARE
 BEGIN
     FOREACH tbl IN ARRAY ARRAY[{tables}]
     LOOP
+        -- news_watch is created by the news-watch job, which may not have run
+        -- yet on a given database. Skip any table that doesn't exist rather
+        -- than aborting the whole heal.
+        CONTINUE WHEN to_regclass('public.' || tbl) IS NULL;
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
         IF NOT EXISTS (
             SELECT 1 FROM pg_policies
@@ -152,12 +156,14 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
         FOREACH rel IN ARRAY ARRAY[{relations}]
         LOOP
+            CONTINUE WHEN to_regclass('public.' || rel) IS NULL;
             EXECUTE format('GRANT SELECT ON %I TO anon', rel);
         END LOOP;
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
         FOREACH rel IN ARRAY ARRAY[{relations}]
         LOOP
+            CONTINUE WHEN to_regclass('public.' || rel) IS NULL;
             EXECUTE format('GRANT SELECT ON %I TO authenticated', rel);
         END LOOP;
     END IF;

@@ -189,6 +189,58 @@ CREATE TABLE breach_collector_log (
     error_message        TEXT
 );
 
+-- ----------------------------------------------------------------------------
+-- 8. News-watch — 7-day title-correlation buffer
+-- ----------------------------------------------------------------------------
+-- Stores ONLY the title + URL + publish date of recent security-news
+-- headlines (never article content). Headlines are correlated by company
+-- name to ledger breaches and surfaced as "related coverage"; unmatched rows
+-- are pruned after ~7 days. This table NEVER creates or edits a breach — see
+-- backend/app/news_watch.py. Created idempotently by that daily job too.
+CREATE TABLE IF NOT EXISTS news_watch (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_slug       TEXT NOT NULL,
+    source_name       TEXT NOT NULL,
+    title             TEXT NOT NULL,
+    url               TEXT NOT NULL UNIQUE,
+    published_at      TIMESTAMPTZ,
+    title_hash        TEXT NOT NULL,               -- sha256 of normalized title
+    org_guess         TEXT,                        -- victim org parsed from the headline
+    org_norm          TEXT,                        -- normalized org, for trigram matching
+    keywords          TEXT[] NOT NULL DEFAULT '{}',
+    similarity        NUMERIC(4,3),                -- name-match score when matched
+    matched_breach_id UUID REFERENCES breaches(id) ON DELETE SET NULL,
+    first_seen        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_news_watch_matched ON news_watch (matched_breach_id);
+CREATE INDEX IF NOT EXISTS idx_news_watch_first_seen ON news_watch (first_seen);
+CREATE INDEX IF NOT EXISTS idx_news_watch_title_hash ON news_watch (title_hash);
+CREATE INDEX IF NOT EXISTS idx_news_watch_org_trgm ON news_watch USING gin (org_norm gin_trgm_ops);
+
+-- ----------------------------------------------------------------------------
+-- 9. Threat Radar — fresh threat signals behind the site's live ticker
+-- ----------------------------------------------------------------------------
+-- Compact "what's happening now" rows (latest ransomware victims, newly
+-- exploited CVEs, etc.) pulled server-side from public feeds. Read-only decor
+-- for researchers; NEVER a breach source. See backend/app/threat_radar.py.
+CREATE TABLE IF NOT EXISTS threat_radar (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind         TEXT NOT NULL,          -- ransomware_victim | kev_cve | otx_pulse | malware_url
+    source_slug  TEXT NOT NULL,
+    source_name  TEXT NOT NULL,
+    external_id  TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    subtitle     TEXT,
+    url          TEXT,
+    published_at TIMESTAMPTZ,
+    first_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source_slug, external_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_threat_radar_published ON threat_radar (published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threat_radar_first_seen ON threat_radar (first_seen);
+
 -- ============================================================================
 -- Indexes
 -- ============================================================================

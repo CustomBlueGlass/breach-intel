@@ -6,9 +6,11 @@ import {
 } from './components';
 import { ToolsView } from './tools';
 import { CommandPalette } from './palette';
+import { ThreatRadar } from './ticker';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
   fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
+  fetchThreatRadar,
 } from './lib/api';
 
 const PAGE_SIZE = 25;
@@ -60,6 +62,7 @@ export default function App() {
   const [topGroups, setTopGroups] = useState([]);
   const [queueItems, setQueueItems] = useState([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [radar, setRadar] = useState([]);
 
   // One-time data: hero stats, intake ticker, filter dropdown options.
   useEffect(() => {
@@ -68,6 +71,7 @@ export default function App() {
     fetchRansomwareGroupOptions()
       .then((groups) => setGroupOptions(groups.map((g) => ({ value: g, label: g }))))
       .catch((e) => console.error('fetchRansomwareGroupOptions', e));
+    fetchThreatRadar().then(setRadar).catch((e) => console.error('fetchThreatRadar', e));
   }, []);
 
   // Ledger list: refetch whenever filters/sort/page change. This is the
@@ -105,7 +109,8 @@ export default function App() {
     setDetailError(null);
     window.history.replaceState(null, '', `#breach=${b.id}`);
     fetchBreachDetail(b.id)
-      .then(({ breach, linked_sources, evidence }) => setDetail({ ...breach, linked_sources, evidence }))
+      .then(({ breach, linked_sources, evidence, related_news }) =>
+        setDetail({ ...breach, linked_sources, evidence, related_news }))
       .catch((e) => {
         console.error('fetchBreachDetail', e);
         setDetailError(e?.message || String(e));
@@ -162,6 +167,7 @@ export default function App() {
       `}</style>
 
       <TopBar tab={tab} setTab={setTab} pendingCount={queueItems.length} />
+      <ThreatRadar items={radar} />
 
       {tab === 'ledger' && (
         <>
