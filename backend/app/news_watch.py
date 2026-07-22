@@ -141,7 +141,9 @@ CREATE_INDEXES = [
 ENSURE_PUBLIC_READ = """
 DO $$
 BEGIN
-    EXECUTE 'ALTER TABLE news_watch ENABLE ROW LEVEL SECURITY';
+    IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.news_watch'::regclass) THEN
+        EXECUTE 'ALTER TABLE news_watch ENABLE ROW LEVEL SECURITY';
+    END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies
         WHERE schemaname = 'public' AND tablename = 'news_watch' AND policyname = 'public read'
@@ -158,7 +160,15 @@ END $$
 """
 
 
+# Must match maintenance.DDL_ADVISORY_LOCK — serializes schema/RLS DDL against
+# a concurrent ingest maintenance pass so the two don't deadlock on table locks
+# (news_watch's CREATE TABLE references breaches, which maintenance also locks).
+DDL_ADVISORY_LOCK = 918273645
+
+
 async def ensure_schema(session) -> None:
+    # Acquire the shared DDL lock before CREATE TABLE takes any table locks.
+    await session.execute(text("SELECT pg_advisory_xact_lock(CAST(:k AS bigint))"), {"k": DDL_ADVISORY_LOCK})
     await session.execute(text(CREATE_TABLE))
     for stmt in CREATE_INDEXES:
         await session.execute(text(stmt))
