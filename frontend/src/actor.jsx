@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import {
-  X, ShieldAlert, Filter, Download, Building2, Copy, Check,
+  X, ShieldAlert, Filter, Download, Building2, Copy, Check, Star,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -87,7 +87,7 @@ export function actorSummaryText(group, stats, aliases) {
   ].filter((l) => l !== '').join('\n');
 }
 
-export function ThreatActorDrawer({ group, profile, isOpen, loading, error, onClose, onOpenBreach, onFilterLedger, onExport }) {
+export function ThreatActorDrawer({ group, profile, isOpen, loading, error, onClose, onOpenBreach, onFilterLedger, onExport, isWatched, onToggleWatch }) {
   const stats = useMemo(() => {
     const vs = profile?.victims || [];
     const dates = vs.map((v) => v.disclosed_date || v.incident_date).filter(Boolean).sort();
@@ -147,6 +147,10 @@ export function ThreatActorDrawer({ group, profile, isOpen, loading, error, onCl
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2 px-6 py-4" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+              <button onClick={() => onToggleWatch?.(group)} title={isWatched ? 'Remove from watchlist' : 'Add to watchlist'}
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs" style={{ ...btn, color: isWatched ? COLORS.amber : COLORS.boneDim }}>
+                <Star size={11} fill={isWatched ? COLORS.amber : 'none'} /> {isWatched ? 'Watching' : 'Watch'}
+              </button>
               <button onClick={() => onFilterLedger(group)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs" style={btn}>
                 <Filter size={11} /> Filter ledger
               </button>
