@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useGoogleFonts, COLORS } from './constants';
 import {
-  TopBar, Hero, FilterBar, LedgerTable, BreachDetailDrawer,
+  TopBar, Hero, FilterBar, LedgerTable, TableToolbar, BreachDetailDrawer,
   AnalyticsView, MatchQueueView, Footer,
 } from './components';
 import { ToolsView } from './tools';
@@ -15,6 +15,16 @@ import {
 } from './lib/api';
 
 const PAGE_SIZE = 25;
+
+// State that should survive reloads (table layout + saved views), backed by
+// localStorage. Falls back to the initial value if storage is unavailable.
+function usePersisted(key, initial) {
+  const [v, setV] = useState(() => {
+    try { const s = localStorage.getItem(key); return s != null ? JSON.parse(s) : initial; } catch { return initial; }
+  });
+  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* ignore */ } }, [key, v]);
+  return [v, setV];
+}
 
 function downloadBlob(content, filename, mime) {
   const url = URL.createObjectURL(new Blob([content], { type: mime }));
@@ -70,6 +80,26 @@ export default function App() {
   const [actorProfile, setActorProfile] = useState(null);
   const [actorLoading, setActorLoading] = useState(false);
   const [actorError, setActorError] = useState(null);
+
+  // Table layout + saved views (persisted).
+  const [hiddenCols, setHiddenCols] = usePersisted('bi.hiddenCols', []);
+  const [density, setDensity] = usePersisted('bi.density', 'comfortable');
+  const [savedViews, setSavedViews] = usePersisted('bi.views', []);
+
+  function saveView() {
+    const name = (window.prompt('Name this view (filters, sort, columns, density):') || '').trim();
+    if (!name) return;
+    const view = { name, filters, sortBy, sortDir, hiddenCols, density };
+    setSavedViews([...savedViews.filter((v) => v.name !== name), view]);
+  }
+  function applyView(v) {
+    if (v.filters) setFilters(v.filters);
+    if (v.sortBy) setSortBy(v.sortBy);
+    if (v.sortDir) setSortDir(v.sortDir);
+    setHiddenCols(v.hiddenCols || []);
+    if (v.density) setDensity(v.density);
+  }
+  function deleteView(name) { setSavedViews(savedViews.filter((v) => v.name !== name)); }
 
   // Anchor at the top of the results so paging can scroll back up to it,
   // instead of leaving the user stranded at the bottom where the pager is.
@@ -251,14 +281,23 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <LedgerTable
-              rows={loadingList ? [] : rows}
-              onOpen={openBreach}
-              onActorClick={openActor}
-              page={page} totalPages={totalPages} setPage={setPage}
-              total={total} pageSize={PAGE_SIZE}
-              sortBy={sortBy} sortDir={sortDir} onSort={sortByColumn}
-            />
+            <>
+              <TableToolbar
+                density={density} setDensity={setDensity}
+                hiddenCols={hiddenCols} setHiddenCols={setHiddenCols}
+                rows={loadingList ? [] : rows}
+                views={savedViews} onSaveView={saveView} onApplyView={applyView} onDeleteView={deleteView}
+              />
+              <LedgerTable
+                rows={loadingList ? [] : rows}
+                onOpen={openBreach}
+                onActorClick={openActor}
+                page={page} totalPages={totalPages} setPage={setPage}
+                total={total} pageSize={PAGE_SIZE}
+                sortBy={sortBy} sortDir={sortDir} onSort={sortByColumn}
+                hiddenCols={hiddenCols} density={density}
+              />
+            </>
           )}
         </>
       )}
