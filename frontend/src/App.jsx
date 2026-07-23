@@ -8,6 +8,7 @@ import { ToolsView } from './tools';
 import { CommandPalette } from './palette';
 import { ThreatRadar } from './ticker';
 import { ThreatActorDrawer, actorStixBundle } from './actor';
+import { WorkspaceView } from './workspace';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
   fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
@@ -86,6 +87,33 @@ export default function App() {
   const [density, setDensity] = usePersisted('bi.density', 'comfortable');
   const [savedViews, setSavedViews] = usePersisted('bi.views', []);
 
+  // Analyst workspace: watchlist + recently-viewed (persisted, browser-local).
+  const [watchlist, setWatchlist] = usePersisted('bi.watchlist', { breaches: [], actors: [] });
+  const [recentViewed, setRecentViewed] = usePersisted('bi.recentViewed', { breaches: [], actors: [] });
+
+  const isWatchedBreach = (id) => (watchlist.breaches || []).some((x) => x.id === id);
+  const isWatchedActor = (g) => (watchlist.actors || []).includes(g);
+  function toggleWatchBreach(b) {
+    setWatchlist((w) => {
+      const has = (w.breaches || []).some((x) => x.id === b.id);
+      return { ...w, breaches: has ? w.breaches.filter((x) => x.id !== b.id) : [{ id: b.id, canonical_name: b.canonical_name }, ...(w.breaches || [])] };
+    });
+  }
+  function toggleWatchActor(g) {
+    setWatchlist((w) => {
+      const has = (w.actors || []).includes(g);
+      return { ...w, actors: has ? w.actors.filter((x) => x !== g) : [g, ...(w.actors || [])] };
+    });
+  }
+  function pushRecentBreach(b) {
+    if (!b?.id) return;
+    setRecentViewed((r) => ({ ...r, breaches: [{ id: b.id, canonical_name: b.canonical_name }, ...(r.breaches || []).filter((x) => x.id !== b.id)].slice(0, 20) }));
+  }
+  function pushRecentActor(g) {
+    setRecentViewed((r) => ({ ...r, actors: [g, ...(r.actors || []).filter((x) => x !== g)].slice(0, 12) }));
+  }
+  const watchCount = (watchlist.breaches?.length || 0) + (watchlist.actors?.length || 0);
+
   function saveView() {
     const name = (window.prompt('Name this view (filters, sort, columns, density):') || '').trim();
     if (!name) return;
@@ -159,8 +187,10 @@ export default function App() {
     setDetailError(null);
     window.history.replaceState(null, '', `#breach=${b.id}`);
     fetchBreachDetail(b.id)
-      .then(({ breach, linked_sources, evidence, related_news }) =>
-        setDetail({ ...breach, linked_sources, evidence, related_news }))
+      .then(({ breach, linked_sources, evidence, related_news }) => {
+        setDetail({ ...breach, linked_sources, evidence, related_news });
+        pushRecentBreach(breach);
+      })
       .catch((e) => {
         console.error('fetchBreachDetail', e);
         setDetailError(e?.message || String(e));
@@ -180,6 +210,7 @@ export default function App() {
     setActorProfile(null);
     setActorError(null);
     setActorGroup(group);
+    pushRecentActor(group);
     window.history.replaceState(null, '', `#actor=${encodeURIComponent(group)}`);
     fetchActorProfile(group)
       .then(setActorProfile)
@@ -254,7 +285,7 @@ export default function App() {
         ::selection { background-color: ${COLORS.amber}; color: ${COLORS.ink}; }
       `}</style>
 
-      <TopBar tab={tab} setTab={setTab} pendingCount={queueItems.length} />
+      <TopBar tab={tab} setTab={setTab} pendingCount={queueItems.length} watchCount={watchCount} />
       <ThreatRadar items={radar} />
 
       {tab === 'ledger' && (
@@ -322,6 +353,18 @@ export default function App() {
         </>
       )}
 
+      {tab === 'workspace' && (
+        <WorkspaceView
+          watchlist={watchlist}
+          recent={recentViewed}
+          onOpenBreach={(row) => { setTab('ledger'); openBreach(row); }}
+          onOpenActor={(g) => { setTab('ledger'); openActor(g); }}
+          onRemoveWatchBreach={(id) => setWatchlist((w) => ({ ...w, breaches: (w.breaches || []).filter((x) => x.id !== id) }))}
+          onRemoveWatchActor={(g) => toggleWatchActor(g)}
+          onClearRecent={() => setRecentViewed({ breaches: [], actors: [] })}
+        />
+      )}
+
       {tab === 'tools' && <ToolsView />}
 
       {tab === 'queue' && <MatchQueueView items={queueItems} />}
@@ -341,6 +384,8 @@ export default function App() {
         error={detailError}
         onClose={closeDrawer}
         onOpenActor={(g) => { closeDrawer(); openActor(g); }}
+        isWatched={detail ? isWatchedBreach(detail.id) : false}
+        onToggleWatch={(b) => toggleWatchBreach(b)}
       />
       <ThreatActorDrawer
         group={actorGroup}
@@ -352,6 +397,8 @@ export default function App() {
         onOpenBreach={(row) => { closeActor(); setTab('ledger'); openBreach(row); }}
         onFilterLedger={(g) => { closeActor(); setTab('ledger'); setFilters({ ...filters, group: g }); }}
         onExport={exportActor}
+        isWatched={actorGroup ? isWatchedActor(actorGroup) : false}
+        onToggleWatch={(g) => toggleWatchActor(g)}
       />
     </div>
   );

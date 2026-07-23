@@ -3,7 +3,7 @@ import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
   FileText, ExternalLink, Download, Copy, Link2, Check, Archive, ShieldCheck,
-  Newspaper, SlidersHorizontal, Save, Trash2,
+  Newspaper, SlidersHorizontal, Save, Trash2, Star,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -110,10 +110,11 @@ export function SourceCategoryChip({ category, sourceName, docType, dateStr, con
 
 /* ------------------------------- top bar -------------------------------- */
 
-export function TopBar({ tab, setTab, pendingCount }) {
+export function TopBar({ tab, setTab, pendingCount, watchCount }) {
   const tabs = [
     { id: 'ledger', label: 'Ledger' },
     { id: 'analytics', label: 'Analytics' },
+    { id: 'workspace', label: 'Workspace', badge: watchCount },
     { id: 'tools', label: 'Tools' },
     { id: 'queue', label: 'Match queue', badge: pendingCount },
   ];
@@ -720,7 +721,7 @@ function CopyButton({ getText, label, Icon = Copy }) {
   );
 }
 
-export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, onOpenActor }) {
+export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, onOpenActor, isWatched, onToggleWatch }) {
   if (!isOpen) return null;
   if (loading || !breach) {
     return (
@@ -811,6 +812,14 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
             <Tag style={{ color: COLORS.amber, backgroundColor: 'rgba(217,142,51,0.12)' }}>Disputed</Tag>
           )}
           <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={() => onToggleWatch?.(breach)}
+              title={isWatched ? 'Remove from watchlist' : 'Add to watchlist'}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs"
+              style={{ fontFamily: FONT_MONO, color: isWatched ? COLORS.amber : COLORS.boneDim, border: `1px solid ${COLORS.line}` }}
+            >
+              <Star size={12} fill={isWatched ? COLORS.amber : 'none'} /> {isWatched ? 'Watching' : 'Watch'}
+            </button>
             <CopyButton label="Copy report" getText={() => breachReportText(breach)} />
             <CopyButton
               label="Copy link"
