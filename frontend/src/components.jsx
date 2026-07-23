@@ -186,7 +186,7 @@ export function Hero({ recent, totalSources, totalBreaches }) {
         </h1>
         <p className="mt-5 max-w-md text-sm leading-relaxed" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
           {totalSources} sources: ransomware leak sites, state AG portals, federal regulators, and security press.
-          Pulled in every six hours, deduplicated, and combined into one detailed record per company breach.
+          Deduplicated and combined into one detailed record per company breach.
         </p>
         <div className="flex items-center gap-6 mt-7">
           <div>
@@ -197,11 +197,6 @@ export function Hero({ recent, totalSources, totalBreaches }) {
           <div>
             <div style={{ fontFamily: FONT_MONO, color: COLORS.bone, fontSize: 22 }}>{totalSources}</div>
             <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>sources tracked</div>
-          </div>
-          <div style={{ width: 1, height: 32, backgroundColor: COLORS.line }} />
-          <div>
-            <div style={{ fontFamily: FONT_MONO, color: COLORS.bone, fontSize: 22 }}>6h</div>
-            <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>ingestion cadence</div>
           </div>
         </div>
       </div>
@@ -218,7 +213,7 @@ export function Hero({ recent, totalSources, totalBreaches }) {
             <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: COLORS.teal }} />
           </span>
           <span className="text-xs uppercase tracking-widest" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.14em' }}>
-            Intake · last 6h
+            Recent intake
           </span>
         </div>
         <div className="space-y-3">
@@ -747,7 +742,19 @@ function buildTimeline(breach) {
     .filter((e) => { const k = e.date + '|' + e.label; if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
-export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, onOpenActor, isWatched, onToggleWatch }) {
+function RelatedRow({ b, onOpen }) {
+  const sev = SEVERITY_META[b.severity] || SEVERITY_META.unrated;
+  return (
+    <button onClick={() => onOpen({ id: b.id })} className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-left hover:underline" style={{ border: `1px solid ${COLORS.lineFaint}` }}>
+      <span className="inline-block rounded-full shrink-0" style={{ width: 6, height: 6, backgroundColor: sev.text }} />
+      <span className="min-w-0 flex-1 truncate text-sm" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>{b.canonical_name}</span>
+      {b.ransomware_group && <span className="text-xs shrink-0" style={{ color: COLORS.red, fontFamily: FONT_MONO }}>{b.ransomware_group}</span>}
+      <span className="text-xs shrink-0" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>{fmtDate(b.disclosed_date || b.incident_date)}</span>
+    </button>
+  );
+}
+
+export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, onOpenActor, onOpenRelated, isWatched, onToggleWatch }) {
   if (!isOpen) return null;
   if (loading || !breach) {
     return (
@@ -1020,6 +1027,32 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
           ))}
         </div>
 
+        {(() => {
+          const rel = breach.related || {};
+          const actor = rel.sameActor || [];
+          const company = rel.sameCompany || [];
+          if (actor.length === 0 && company.length === 0) return null;
+          return (
+            <div className="px-6 py-5" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+              <div className="text-xs uppercase tracking-widest mb-3" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+                Related breaches
+              </div>
+              {company.length > 0 && (
+                <div className="mb-3">
+                  <div className="text-xs mb-1.5" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Other incidents at {breach.canonical_name}</div>
+                  <div className="space-y-1">{company.map((b) => <RelatedRow key={b.id} b={b} onOpen={onOpenRelated} />)}</div>
+                </div>
+              )}
+              {actor.length > 0 && (
+                <div>
+                  <div className="text-xs mb-1.5" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Other victims of {breach.ransomware_group}</div>
+                  <div className="space-y-1">{actor.map((b) => <RelatedRow key={b.id} b={b} onOpen={onOpenRelated} />)}</div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         <div className="px-6 pb-6 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>
           First seen {fmtDateTime(breach.first_seen_at)} · last updated {fmtDateTime(breach.last_updated_at)}
         </div>
@@ -1194,9 +1227,6 @@ export function Footer({ onAbout }) {
               About
             </button>
           )}
-          <span className="text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}>
-            Sources re-ingested every 6 hours
-          </span>
         </div>
       </div>
     </footer>
