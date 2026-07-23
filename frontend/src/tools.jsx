@@ -728,6 +728,185 @@ function UrlTool() {
   );
 }
 
+/* --------------------------- JSON formatter ------------------------------- */
+
+function JsonTool() {
+  const [text, setText] = useState('');
+  let pretty = '', min = '', err = null;
+  const t = text.trim();
+  if (t) {
+    try { const o = JSON.parse(t); pretty = JSON.stringify(o, null, 2); min = JSON.stringify(o); }
+    catch (e) { err = e.message; }
+  }
+  return (
+    <ToolCard title="JSON formatter & validator" subtitle="Pretty-print, minify, and validate JSON. Runs locally.">
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4}
+        placeholder='{"paste":"JSON here"}' className="w-full text-sm rounded-md px-3 py-2 outline-none resize-y break-all" style={inputStyle} />
+      {err && <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.red }}>invalid JSON: {err}</div>}
+      {pretty && (
+        <div className="mt-2 space-y-2">
+          <div>
+            <div className="flex items-center justify-between mb-1"><span className="text-xs" style={{ ...mono, color: COLORS.amber }}>Formatted</span><CopyBtn text={pretty} small /></div>
+            <pre className="rounded p-2 text-xs overflow-x-auto" style={{ ...mono, color: COLORS.bone, backgroundColor: COLORS.ink, border: `1px solid ${COLORS.lineFaint}`, maxHeight: 240 }}>{pretty}</pre>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1"><span className="text-xs" style={{ ...mono, color: COLORS.amber }}>Minified ({min.length} bytes)</span><CopyBtn text={min} small /></div>
+            <div className="rounded p-2 text-xs break-all" style={{ ...mono, color: COLORS.boneDim, backgroundColor: COLORS.ink, border: `1px solid ${COLORS.lineFaint}` }}>{min}</div>
+          </div>
+        </div>
+      )}
+    </ToolCard>
+  );
+}
+
+/* --------------------------- Google dork generator ------------------------ */
+
+function DorkTool() {
+  const [domain, setDomain] = useState('');
+  const [kw, setKw] = useState('');
+  const d = domain.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  const k = kw.trim();
+  const dorks = useMemo(() => {
+    const list = [];
+    if (d) {
+      list.push(['All indexed pages', `site:${d}`]);
+      list.push(['Subdomains (exclude www)', `site:${d} -inurl:www`]);
+      list.push(['Documents', `site:${d} (filetype:pdf OR filetype:doc OR filetype:docx OR filetype:xls OR filetype:xlsx OR filetype:csv)`]);
+      list.push(['Exposed configs / data', `site:${d} (ext:env OR ext:sql OR ext:log OR ext:bak OR ext:ini OR ext:yml OR ext:conf)`]);
+      list.push(['Login / admin surfaces', `site:${d} (inurl:login OR inurl:admin OR inurl:signin OR inurl:portal OR inurl:dashboard)`]);
+      list.push(['Open directory listings', `site:${d} intitle:"index of"`]);
+      list.push(['Sensitive text', `site:${d} (intext:password OR intext:confidential OR intext:"internal use only")`]);
+      list.push(['Mentioned on Pastebin', `site:pastebin.com "${d}"`]);
+      list.push(['Mentioned on GitHub', `site:github.com "${d}"`]);
+      list.push(['On cloud / paste hosts', `"${d}" (site:s3.amazonaws.com OR site:trello.com OR site:gitlab.com OR site:atlassian.net)`]);
+    }
+    if (k) {
+      list.push([`"${k}" documents`, `"${k}" (filetype:pdf OR filetype:xlsx OR filetype:docx)`]);
+      list.push([`"${k}" on paste sites`, `"${k}" (site:pastebin.com OR site:ghostbin.com OR site:justpaste.it)`]);
+      if (d) list.push([`"${k}" on ${d}`, `site:${d} "${k}"`]);
+    }
+    return list;
+  }, [d, k]);
+
+  return (
+    <ToolCard title="Google dork generator" subtitle="Build OSINT/recon search queries for a domain or keyword. Opens Google in a new tab; nothing is sent from here.">
+      <div className="flex gap-2">
+        <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="example.com"
+          className="flex-1 text-sm rounded-md px-3 py-2 outline-none" style={inputStyle} />
+        <input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="keyword (optional)"
+          className="flex-1 text-sm rounded-md px-3 py-2 outline-none" style={inputStyle} />
+      </div>
+      {dorks.length > 0 && (
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-xs" style={{ ...mono, color: COLORS.boneFaint }}>{dorks.length} dorks</span>
+          <CopyBtn text={dorks.map(([, q]) => q).join('\n')} small />
+        </div>
+      )}
+      <div className="mt-2 space-y-1">
+        {dorks.map(([label, q]) => (
+          <a key={label} href={`https://www.google.com/search?q=${encodeURIComponent(q)}`} target="_blank" rel="noopener noreferrer"
+            className="block rounded px-2 py-1.5 hover:underline" style={{ border: `1px solid ${COLORS.lineFaint}` }}>
+            <span className="flex items-center gap-1.5 text-xs" style={{ color: COLORS.amberSoft, fontFamily: FONT_BODY }}>
+              <ExternalLink size={11} /> {label}
+            </span>
+            <span className="block text-xs break-all mt-0.5" style={{ ...mono, color: COLORS.boneDim }}>{q}</span>
+          </a>
+        ))}
+        {dorks.length === 0 && <div className="text-xs" style={{ ...mono, color: COLORS.boneFaint }}>Enter a domain or keyword.</div>}
+      </div>
+    </ToolCard>
+  );
+}
+
+/* --------------------------- Email header analyzer ------------------------ */
+
+function parseHeaders(raw) {
+  const lines = raw.replace(/\r\n/g, '\n').split('\n');
+  const headers = [];
+  for (const line of lines) {
+    if (line.trim() === '' && headers.length) break; // blank line ends the header block
+    if (/^[ \t]/.test(line) && headers.length) headers[headers.length - 1].value += ' ' + line.trim();
+    else { const m = line.match(/^([!-9;-~]+):[ \t]?(.*)$/); if (m) headers.push({ name: m[1], value: m[2] }); }
+  }
+  return headers;
+}
+
+function EmailHeaderTool() {
+  const [raw, setRaw] = useState('');
+  const info = useMemo(() => {
+    if (!raw.trim()) return null;
+    const headers = parseHeaders(raw);
+    if (!headers.length) return { empty: true };
+    const get = (n) => headers.find((h) => h.name.toLowerCase() === n.toLowerCase())?.value;
+    const received = headers.filter((h) => h.name.toLowerCase() === 'received').map((h) => h.value);
+    const hops = received.map((r) => {
+      const from = (r.match(/from\s+([^\s;()]+)/i) || [])[1];
+      const by = (r.match(/\bby\s+([^\s;()]+)/i) || [])[1];
+      const dt = new Date((r.split(';').pop() || '').trim());
+      return { from, by, date: Number.isNaN(dt.getTime()) ? null : dt };
+    });
+    const path = [...hops].reverse(); // Received headers are prepended -> reverse = chronological
+    const auth = get('Authentication-Results') || '';
+    const grab = (re) => (auth.match(re) || [])[1];
+    const spf = grab(/spf=(\w+)/i), dkim = grab(/dkim=(\w+)/i), dmarc = grab(/dmarc=(\w+)/i);
+    const fromH = get('From'), replyTo = get('Reply-To');
+    const domOf = (s) => (s && (s.match(/@([^\s>]+)/) || [])[1] || '').toLowerCase();
+    const flags = [];
+    const bad = (v) => v && v.toLowerCase() !== 'pass';
+    if (bad(spf)) flags.push(`SPF ${spf}`);
+    if (bad(dkim)) flags.push(`DKIM ${dkim}`);
+    if (bad(dmarc)) flags.push(`DMARC ${dmarc}`);
+    if (replyTo && fromH && domOf(replyTo) && domOf(replyTo) !== domOf(fromH)) flags.push('Reply-To domain differs from From');
+    return { get, path, spf, dkim, dmarc, fromH, replyTo, flags };
+  }, [raw]);
+
+  const authColor = (v) => (!v ? COLORS.boneFaint : v.toLowerCase() === 'pass' ? COLORS.teal : COLORS.red);
+
+  return (
+    <ToolCard title="Email header analyzer" subtitle="Paste raw headers to trace the delivery path and read SPF/DKIM/DMARC. Parsed locally; nothing is uploaded.">
+      <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={4}
+        placeholder="Paste full email headers (Received, From, Authentication-Results, …)" className="w-full text-sm rounded-md px-3 py-2 outline-none resize-y" style={inputStyle} />
+      {info && info.empty && <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.red }}>no headers found</div>}
+      {info && !info.empty && (
+        <div className="mt-2">
+          <Field label="From" value={info.fromH || '-'} mono={false} />
+          {info.get('To') && <Field label="To" value={info.get('To')} mono={false} />}
+          {info.get('Subject') && <Field label="Subject" value={info.get('Subject')} mono={false} />}
+          {info.replyTo && <Field label="Reply-To" value={info.replyTo} mono={false} />}
+          <div className="flex items-center gap-3 py-1.5" style={{ borderTop: `1px solid ${COLORS.lineFaint}` }}>
+            {['SPF', 'DKIM', 'DMARC'].map((a, i) => {
+              const v = [info.spf, info.dkim, info.dmarc][i];
+              return <span key={a} className="text-xs" style={{ ...mono, color: authColor(v) }}>{a}: {v || 'n/a'}</span>;
+            })}
+          </div>
+          {info.flags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 py-1">
+              {info.flags.map((f) => <span key={f} className="text-xs px-2 py-0.5 rounded" style={{ ...mono, color: COLORS.red, backgroundColor: 'rgba(192,71,58,0.10)', border: `1px solid ${COLORS.line}` }}>{f}</span>)}
+            </div>
+          )}
+          {info.path.length > 0 && (
+            <div className="mt-1">
+              <div className="text-xs mb-1" style={{ ...mono, color: COLORS.amber }}>Delivery path ({info.path.length} hops)</div>
+              <div className="space-y-1">
+                {info.path.map((h, i) => {
+                  const prev = info.path[i - 1];
+                  const delay = prev && prev.date && h.date ? Math.round((h.date - prev.date) / 1000) : null;
+                  return (
+                    <div key={i} className="text-xs rounded p-1.5 break-all" style={{ ...mono, color: COLORS.boneDim, backgroundColor: COLORS.ink, border: `1px solid ${COLORS.lineFaint}` }}>
+                      <span style={{ color: COLORS.boneFaint }}>{i + 1}.</span> {h.from || '?'} <span style={{ color: COLORS.boneFaint }}>→</span> {h.by || '?'}
+                      {delay != null && <span style={{ color: delay > 30 ? COLORS.amber : COLORS.boneFaint }}> (+{delay}s)</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </ToolCard>
+  );
+}
+
 /* --------------------------------- View ----------------------------------- */
 
 export function ToolsView() {
@@ -745,9 +924,12 @@ export function ToolsView() {
         <EnrichmentLaunchpad />
         <IocExtractor />
         <UrlTool />
+        <EmailHeaderTool />
+        <DorkTool />
         <CidrTool />
         <HashTool />
         <HashIdTool />
+        <JsonTool />
         <Base64Tool />
         <JwtTool />
         <TimestampTool />
