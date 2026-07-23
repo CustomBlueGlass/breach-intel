@@ -386,7 +386,7 @@ export function LedgerRow({ b, onOpen, onActorClick }) {
           <button
             onClick={(e) => { e.stopPropagation(); onActorClick?.(b.ransomware_group); }}
             className="hover:underline"
-            title={`Filter ledger to ${b.ransomware_group}`}
+            title={`View ${b.ransomware_group} threat-actor profile`}
             style={{ color: COLORS.red, fontFamily: FONT_BODY }}
           >
             {b.ransomware_group}
@@ -451,6 +451,7 @@ export function LedgerCard({ b, onOpen, onActorClick }) {
           <span
             role="button"
             onClick={(e) => { e.stopPropagation(); onActorClick?.(b.ransomware_group); }}
+            title={`View ${b.ransomware_group} threat-actor profile`}
             style={{ color: COLORS.red }}
           >
             {b.ransomware_group}
@@ -614,7 +615,7 @@ function CopyButton({ getText, label, Icon = Copy }) {
   );
 }
 
-export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) {
+export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, onOpenActor }) {
   if (!isOpen) return null;
   if (loading || !breach) {
     return (
@@ -692,7 +693,14 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error }) 
             </Tag>
           )}
           {breach.ransomware_group && (
-            <Tag style={{ color: COLORS.red, backgroundColor: 'rgba(192,71,58,0.12)' }}>{breach.ransomware_group}</Tag>
+            <button
+              onClick={() => onOpenActor?.(breach.ransomware_group)}
+              title={`View ${breach.ransomware_group} threat-actor profile`}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs hover:underline"
+              style={{ color: COLORS.red, backgroundColor: 'rgba(192,71,58,0.12)', fontFamily: FONT_MONO }}
+            >
+              <ShieldAlert size={11} /> {breach.ransomware_group}
+            </button>
           )}
           {breach.status === 'disputed' && (
             <Tag style={{ color: COLORS.amber, backgroundColor: 'rgba(217,142,51,0.12)' }}>Disputed</Tag>
@@ -871,7 +879,7 @@ export function ChartCard({ title, children, height = 240 }) {
   );
 }
 
-export function AnalyticsView({ trends, topGroups }) {
+export function AnalyticsView({ trends, topGroups, onOpenActor }) {
   const trend = useMemo(() => {
     const byWeek = {};
     (trends || []).forEach((row) => {
@@ -924,14 +932,15 @@ export function AnalyticsView({ trends, topGroups }) {
         </ChartCard>
       </div>
 
-      <ChartCard title="Top ransomware groups by victim count">
+      <ChartCard title="Top ransomware groups by victim count (click to open profile)">
         <ResponsiveContainer>
           <BarChart data={byGroup} layout="vertical" margin={{ left: 10 }}>
             <CartesianGrid stroke={COLORS.lineFaint} horizontal={false} />
             <XAxis type="number" tick={axisStyle} axisLine={false} tickLine={false} />
             <YAxis type="category" dataKey="group" tick={axisStyle} axisLine={false} tickLine={false} width={120} />
-            <Tooltip contentStyle={{ backgroundColor: COLORS.ink, border: `1px solid ${COLORS.line}`, fontFamily: FONT_BODY, fontSize: 12 }} />
-            <Bar dataKey="count" fill={COLORS.red} radius={[0, 3, 3, 0]} />
+            <Tooltip contentStyle={{ backgroundColor: COLORS.ink, border: `1px solid ${COLORS.line}`, fontFamily: FONT_BODY, fontSize: 12 }} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+            <Bar dataKey="count" fill={COLORS.red} radius={[0, 3, 3, 0]} cursor="pointer"
+              onClick={(d) => { const g = d && (d.group ?? d.payload?.group); if (g) onOpenActor?.(g); }} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>

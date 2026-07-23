@@ -7,10 +7,11 @@ import {
 import { ToolsView } from './tools';
 import { CommandPalette } from './palette';
 import { ThreatRadar } from './ticker';
+import { ThreatActorDrawer, actorStixBundle } from './actor';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
   fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
-  fetchThreatRadar,
+  fetchThreatRadar, fetchActorProfile,
 } from './lib/api';
 
 const PAGE_SIZE = 25;
@@ -63,6 +64,12 @@ export default function App() {
   const [queueItems, setQueueItems] = useState([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [radar, setRadar] = useState([]);
+
+  const [actorOpen, setActorOpen] = useState(false);
+  const [actorGroup, setActorGroup] = useState(null);
+  const [actorProfile, setActorProfile] = useState(null);
+  const [actorLoading, setActorLoading] = useState(false);
+  const [actorError, setActorError] = useState(null);
 
   // Anchor at the top of the results so paging can scroll back up to it,
   // instead of leaving the user stranded at the bottom where the pager is.
@@ -136,11 +143,49 @@ export default function App() {
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 
-  // Permalink support: #breach=<id> opens that company's details directly,
-  // so researchers can share a link straight to a case.
+  function openActor(group) {
+    if (!group) return;
+    setActorOpen(true);
+    setActorLoading(true);
+    setActorProfile(null);
+    setActorError(null);
+    setActorGroup(group);
+    window.history.replaceState(null, '', `#actor=${encodeURIComponent(group)}`);
+    fetchActorProfile(group)
+      .then(setActorProfile)
+      .catch((e) => { console.error('fetchActorProfile', e); setActorError(e?.message || String(e)); })
+      .finally(() => setActorLoading(false));
+  }
+
+  function closeActor() {
+    setActorOpen(false);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+
+  // Export an actor's attributed victims: CSV, JSON, or a STIX 2.1 bundle
+  // (intrusion-set + victim identities + targets relationships) for a TIP.
+  function exportActor(format) {
+    const g = actorGroup || 'actor';
+    const victims = actorProfile?.victims || [];
+    const aliases = actorProfile?.aliases || [];
+    const stamp = new Date().toISOString().slice(0, 10);
+    const safe = g.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    if (format === 'csv') {
+      downloadBlob(toCsv(victims), `${safe}-victims-${stamp}.csv`, 'text/csv');
+    } else if (format === 'stix') {
+      downloadBlob(JSON.stringify(actorStixBundle(g, victims, aliases), null, 2), `${safe}-stix-${stamp}.json`, 'application/json');
+    } else {
+      downloadBlob(JSON.stringify({ actor: g, aliases, victims }, null, 2), `${safe}-${stamp}.json`, 'application/json');
+    }
+  }
+
+  // Permalink support: #breach=<id> opens a case; #actor=<name> opens an actor
+  // profile — so researchers can share a link straight to either.
   useEffect(() => {
-    const m = window.location.hash.match(/^#breach=([0-9a-f-]{36})$/i);
-    if (m) openBreach({ id: m[1] });
+    const hb = window.location.hash.match(/^#breach=([0-9a-f-]{36})$/i);
+    if (hb) { openBreach({ id: hb[1] }); return; }
+    const ha = window.location.hash.match(/^#actor=(.+)$/);
+    if (ha) { try { openActor(decodeURIComponent(ha[1])); } catch { /* ignore */ } }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -209,7 +254,7 @@ export default function App() {
             <LedgerTable
               rows={loadingList ? [] : rows}
               onOpen={openBreach}
-              onActorClick={(group) => setFilters({ ...filters, group })}
+              onActorClick={openActor}
               page={page} totalPages={totalPages} setPage={setPage}
               total={total} pageSize={PAGE_SIZE}
               sortBy={sortBy} sortDir={sortDir} onSort={sortByColumn}
@@ -234,7 +279,7 @@ export default function App() {
               <div className="text-xs" style={{ color: COLORS.boneFaint }}>pending manual review</div>
             </div>
           </div>
-          <AnalyticsView trends={trends} topGroups={topGroups} />
+          <AnalyticsView trends={trends} topGroups={topGroups} onOpenActor={openActor} />
         </>
       )}
 
@@ -256,6 +301,18 @@ export default function App() {
         loading={detailLoading}
         error={detailError}
         onClose={closeDrawer}
+        onOpenActor={(g) => { closeDrawer(); openActor(g); }}
+      />
+      <ThreatActorDrawer
+        group={actorGroup}
+        profile={actorProfile}
+        isOpen={actorOpen}
+        loading={actorLoading}
+        error={actorError}
+        onClose={closeActor}
+        onOpenBreach={(row) => { closeActor(); setTab('ledger'); openBreach(row); }}
+        onFilterLedger={(g) => { closeActor(); setTab('ledger'); setFilters({ ...filters, group: g }); }}
+        onExport={exportActor}
       />
     </div>
   );
