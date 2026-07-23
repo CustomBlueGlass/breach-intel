@@ -177,6 +177,39 @@ export async function fetchThreatRadar(limit = 40) {
   }
 }
 
+// Threat-actor profile: every ledger victim attributed to this group, plus
+// the raw name variants seen across sources ("also reported as"). Victim-level
+// stats (timeline, industries, first/last seen) are derived in the component.
+export async function fetchActorProfile(group) {
+  const [{ data: victims, error: vErr }, { data: rawRows }] = await Promise.all([
+    supabase
+      .from('mv_breach_ledger')
+      .select('id, canonical_name, industry, country, region_state, incident_date, disclosed_date, records_affected_est, severity')
+      .ilike('ransomware_group', group)
+      .order('disclosed_date', { ascending: false, nullsFirst: false })
+      .limit(500),
+    supabase
+      .from('breach_source_records')
+      .select('ransomware_group_raw')
+      .ilike('ransomware_group_norm', group)
+      .not('ransomware_group_raw', 'is', null)
+      .limit(300),
+  ]);
+  if (vErr) throw vErr;
+
+  const seen = new Set();
+  const aliases = [];
+  for (const r of rawRows || []) {
+    const a = (r.ransomware_group_raw || '').trim();
+    const key = a.toLowerCase();
+    if (a && key !== group.toLowerCase() && !seen.has(key)) {
+      seen.add(key);
+      aliases.push(a);
+    }
+  }
+  return { group, victims: victims || [], aliases };
+}
+
 export async function fetchTrends() {
   const { data, error } = await supabase
     .from('mv_breach_trends')
