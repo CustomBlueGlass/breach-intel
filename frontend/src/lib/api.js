@@ -145,10 +145,33 @@ export async function fetchBreachDetail(id) {
     related_news = [];
   }
 
+  // Related breaches: other victims of the same threat actor, and other
+  // incidents at the same company (repeat victims). Best-effort; excludes the
+  // current breach.
+  let related = { sameActor: [], sameCompany: [] };
+  if (breach) {
+    try {
+      const cols = 'id, canonical_name, disclosed_date, incident_date, industry, ransomware_group, severity';
+      const actorQ = breach.ransomware_group
+        ? supabase.from('mv_breach_ledger').select(cols)
+            .ilike('ransomware_group', breach.ransomware_group).neq('id', id)
+            .order('disclosed_date', { ascending: false, nullsFirst: false }).limit(6)
+        : Promise.resolve({ data: [] });
+      const companyQ = supabase.from('mv_breach_ledger').select(cols)
+        .ilike('canonical_name', breach.canonical_name).neq('id', id)
+        .order('disclosed_date', { ascending: false, nullsFirst: false }).limit(5);
+      const [{ data: byActor }, { data: byCompany }] = await Promise.all([actorQ, companyQ]);
+      related = { sameActor: byActor || [], sameCompany: byCompany || [] };
+    } catch {
+      related = { sameActor: [], sameCompany: [] };
+    }
+  }
+
   return {
     breach,
     evidence,
     related_news,
+    related,
     linked_sources: (sources || []).map((s) => ({
       source_name: s.breach_data_sources?.name,
       source_category: s.breach_data_sources?.category,

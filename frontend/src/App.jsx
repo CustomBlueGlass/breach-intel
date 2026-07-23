@@ -188,8 +188,8 @@ export default function App() {
     setDetailError(null);
     window.history.replaceState(null, '', `#breach=${b.id}`);
     fetchBreachDetail(b.id)
-      .then(({ breach, linked_sources, evidence, related_news }) => {
-        setDetail({ ...breach, linked_sources, evidence, related_news });
+      .then(({ breach, linked_sources, evidence, related_news, related }) => {
+        setDetail({ ...breach, linked_sources, evidence, related_news, related });
         pushRecentBreach(breach);
       })
       .catch((e) => {
@@ -387,6 +387,7 @@ export default function App() {
         error={detailError}
         onClose={closeDrawer}
         onOpenActor={(g) => { closeDrawer(); openActor(g); }}
+        onOpenRelated={(row) => openBreach(row)}
         isWatched={detail ? isWatchedBreach(detail.id) : false}
         onToggleWatch={(b) => toggleWatchBreach(b)}
       />
