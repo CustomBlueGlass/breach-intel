@@ -87,6 +87,8 @@ export default function App() {
   const [hiddenCols, setHiddenCols] = usePersisted('bi.hiddenCols', []);
   const [density, setDensity] = usePersisted('bi.density', 'comfortable');
   const [savedViews, setSavedViews] = usePersisted('bi.views', []);
+  const [colWidths, setColWidths] = usePersisted('bi.colWidths', {});
+  const onColResize = (key, w) => setColWidths((c) => ({ ...c, [key]: w }));
 
   // Analyst workspace: watchlist + recently-viewed (persisted, browser-local).
   const [watchlist, setWatchlist] = usePersisted('bi.watchlist', { breaches: [], actors: [] });
@@ -321,6 +323,7 @@ export default function App() {
                 hiddenCols={hiddenCols} setHiddenCols={setHiddenCols}
                 rows={loadingList ? [] : rows}
                 views={savedViews} onSaveView={saveView} onApplyView={applyView} onDeleteView={deleteView}
+                onResetWidths={() => setColWidths({})}
               />
               <LedgerTable
                 rows={loadingList ? [] : rows}
@@ -330,6 +333,7 @@ export default function App() {
                 total={total} pageSize={PAGE_SIZE}
                 sortBy={sortBy} sortDir={sortDir} onSort={sortByColumn}
                 hiddenCols={hiddenCols} density={density}
+                colWidths={colWidths} onColResize={onColResize}
               />
             </>
           )}

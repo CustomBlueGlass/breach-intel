@@ -368,10 +368,10 @@ export const LEDGER_COLUMNS = [
     text: (b) => b.canonical_name || '',
     cell: (b) => (
       <>
-        <div style={{ color: COLORS.bone, fontFamily: FONT_BODY, fontWeight: 500 }} className="group-hover:underline">
+        <div className="truncate group-hover:underline" style={{ color: COLORS.bone, fontFamily: FONT_BODY, fontWeight: 500 }}>
           {b.canonical_name}
         </div>
-        <div style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>
+        <div className="truncate" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>
           {[INDUSTRY_LABELS[b.industry] || b.industry, [b.region_state, b.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '-'}
         </div>
       </>
@@ -422,6 +422,11 @@ export const LEDGER_COLUMNS = [
 
 const alignClass = (a) => (a === 'right' ? 'text-right' : a === 'center' ? 'text-center' : 'text-left');
 
+// Default column widths (px). Resizing overrides these per column, persisted.
+export const COL_DEFAULT_WIDTH = { company: 320, actor: 160, incident: 120, disclosed: 120, records: 130, sources: 100, severity: 120 };
+const ACTIONS_WIDTH = 84;
+const colWidthOf = (widths, key) => widths[key] ?? COL_DEFAULT_WIDTH[key] ?? 120;
+
 export function visibleColumns(hiddenCols = []) {
   return LEDGER_COLUMNS.filter((c) => c.locked || !hiddenCols.includes(c.key));
 }
@@ -437,7 +442,7 @@ export function LedgerRow({ b, cols, pad, onOpen, onActorClick }) {
     <tr onClick={() => onOpen(b)} className="cursor-pointer transition-colors group hover:bg-white/[0.03]" style={{ borderBottom: `1px solid ${COLORS.lineFaint}` }}>
       {cols.map((c, i) => (
         <td key={c.key}
-          className={`${pad} text-sm ${alignClass(c.align)} ${c.align !== 'left' || c.key === 'incident' || c.key === 'disclosed' ? 'whitespace-nowrap' : ''}`}
+          className={`${pad} text-sm overflow-hidden ${alignClass(c.align)} ${c.align !== 'left' || c.key === 'incident' || c.key === 'disclosed' ? 'whitespace-nowrap' : ''}`}
           style={{ paddingLeft: i === 0 ? 24 : undefined }}>
           {c.cell(b, { onActorClick })}
         </td>
@@ -492,24 +497,47 @@ export function LedgerCard({ b, onOpen, onActorClick }) {
   );
 }
 
-export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setPage, total, pageSize, sortBy, sortDir, onSort, hiddenCols = [], density = 'comfortable' }) {
+export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setPage, total, pageSize, sortBy, sortDir, onSort, hiddenCols = [], density = 'comfortable', colWidths = {}, onColResize }) {
   const cols = visibleColumns(hiddenCols);
   const pad = density === 'compact' ? 'px-4 py-1.5' : 'px-4 py-3';
   const startIdx = (page - 1) * pageSize + 1;
   const endIdx = Math.min(page * pageSize, total);
+  const tableWidth = cols.reduce((s, c) => s + colWidthOf(colWidths, c.key), 0) + ACTIONS_WIDTH;
+
+  // Drag-to-resize a column. Listeners live on window so the drag continues
+  // even when the cursor leaves the thin handle.
+  function startResize(key, e) {
+    if (!onColResize) return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX;
+    const startW = colWidthOf(colWidths, key);
+    const onMove = (ev) => onColResize(key, Math.max(64, startW + (ev.clientX - startX)));
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+  }
 
   return (
     <div>
       {/* Desktop: full sortable table. Hidden below md, where a multi-column
           table is unusable — a card list renders instead. */}
       <div className="overflow-x-auto hidden md:block">
-        <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: tableWidth }}>
+          <colgroup>
+            {cols.map((c) => <col key={c.key} style={{ width: colWidthOf(colWidths, c.key) }} />)}
+            <col style={{ width: ACTIONS_WIDTH }} />
+          </colgroup>
           <thead>
             <tr style={{ borderBottom: `1px solid ${COLORS.line}` }}>
               {cols.map((c, i) => (
                 <th
                   key={c.key}
-                  className={`px-4 py-2 text-xs uppercase font-medium whitespace-nowrap ${alignClass(c.align)}`}
+                  className={`relative px-4 py-2 text-xs uppercase font-medium whitespace-nowrap overflow-hidden ${alignClass(c.align)}`}
                   style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.06em', ...(i === 0 ? { paddingLeft: 24 } : {}) }}
                 >
                   {c.sortKey ? (
@@ -525,6 +553,14 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
                       {c.label}{sortBy === c.sortKey ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
                     </button>
                   ) : c.label}
+                  {onColResize && (
+                    <span
+                      onMouseDown={(e) => startResize(c.key, e)}
+                      title="Drag to resize column"
+                      className="absolute top-0 h-full"
+                      style={{ right: -3, width: 7, cursor: 'col-resize', zIndex: 1 }}
+                    />
+                  )}
                 </th>
               ))}
               <th className="px-6 py-2" />
@@ -581,7 +617,7 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
 
 // Desktop table controls: row density, column show/hide, copy-page, and named
 // saved views (filters + sort + columns + density persisted in localStorage).
-export function TableToolbar({ density, setDensity, hiddenCols, setHiddenCols, rows, views, onSaveView, onApplyView, onDeleteView }) {
+export function TableToolbar({ density, setDensity, hiddenCols, setHiddenCols, rows, views, onSaveView, onApplyView, onDeleteView, onResetWidths }) {
   const [menu, setMenu] = React.useState(null);
   const [copied, setCopied] = React.useState(false);
   const cols = visibleColumns(hiddenCols);
@@ -623,6 +659,14 @@ export function TableToolbar({ density, setDensity, hiddenCols, setHiddenCols, r
                 </button>
               );
             })}
+            {onResetWidths && (
+              <>
+                <div style={{ borderTop: `1px solid ${COLORS.lineFaint}`, margin: '4px 0' }} />
+                <button onClick={() => { setMenu(null); onResetWidths(); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs rounded hover:bg-white/[0.04]" style={{ fontFamily: FONT_BODY, color: COLORS.boneDim }}>
+                  Reset column widths
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
