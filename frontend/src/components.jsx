@@ -3,7 +3,7 @@ import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
   FileText, ExternalLink, Download, Copy, Link2, Check, Archive, ShieldCheck,
-  Newspaper,
+  Newspaper, SlidersHorizontal, Save, Trash2,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -363,68 +363,99 @@ export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, set
 
 /* -------------------------------- ledger table --------------------------- */
 
-export function LedgerRow({ b, onOpen, onActorClick }) {
-  return (
-    <tr
-      onClick={() => onOpen(b)}
-      className="cursor-pointer transition-colors group hover:bg-white/[0.03]"
-      style={{ borderBottom: `1px solid ${COLORS.lineFaint}` }}
-    >
-      <td className="px-6 py-3">
+// Column registry — the single source of truth for the header, each row,
+// column show/hide, copy-row, and copy-page. `cell` renders the table cell;
+// `text` is the plain value used for copy/TSV.
+export const LEDGER_COLUMNS = [
+  {
+    key: 'company', label: 'Company', locked: true, align: 'left',
+    text: (b) => b.canonical_name || '',
+    cell: (b) => (
+      <>
         <div style={{ color: COLORS.bone, fontFamily: FONT_BODY, fontWeight: 500 }} className="group-hover:underline">
           {b.canonical_name}
         </div>
         <div style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>
-          {[
-            INDUSTRY_LABELS[b.industry] || b.industry,
-            [b.region_state, b.country].filter(Boolean).join(', '),
-          ].filter(Boolean).join(' · ') || '-'}
+          {[INDUSTRY_LABELS[b.industry] || b.industry, [b.region_state, b.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '-'}
         </div>
-      </td>
-      <td className="px-4 py-3 text-sm">
-        {b.ransomware_group ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); onActorClick?.(b.ransomware_group); }}
-            className="hover:underline"
-            title={`View ${b.ransomware_group} threat-actor profile`}
-            style={{ color: COLORS.red, fontFamily: FONT_BODY }}
-          >
-            {b.ransomware_group}
+      </>
+    ),
+  },
+  {
+    key: 'actor', label: 'Threat actor', align: 'left',
+    text: (b) => b.ransomware_group || 'Unattributed',
+    cell: (b, { onActorClick }) => (b.ransomware_group ? (
+      <button onClick={(e) => { e.stopPropagation(); onActorClick?.(b.ransomware_group); }} className="hover:underline"
+        title={`View ${b.ransomware_group} threat-actor profile`} style={{ color: COLORS.red, fontFamily: FONT_BODY }}>
+        {b.ransomware_group}
+      </button>
+    ) : <span style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Unattributed</span>),
+  },
+  {
+    key: 'incident', label: 'Incident', sortKey: 'incident_date', align: 'left',
+    text: (b) => (b.incident_date ? fmtDate(b.incident_date) : ''),
+    cell: (b) => <span style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>{fmtDate(b.incident_date)}</span>,
+  },
+  {
+    key: 'disclosed', label: 'Disclosed', sortKey: 'disclosed_date', align: 'left',
+    text: (b) => (b.disclosed_date ? fmtDate(b.disclosed_date) : (b.incident_date ? `~${fmtDate(b.incident_date)}` : '')),
+    cell: (b) => (b.disclosed_date
+      ? <span style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>{fmtDate(b.disclosed_date)}</span>
+      : b.incident_date
+        ? <span title="No separate disclosure date on record; showing incident date" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>~{fmtDate(b.incident_date)}</span>
+        : <span style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>-</span>),
+  },
+  {
+    key: 'records', label: 'Records', sortKey: 'records_affected_est', align: 'right',
+    text: (b) => (b.records_affected_est != null ? String(b.records_affected_est) : ''),
+    cell: (b) => (b.records_affected_est != null
+      ? <span style={{ color: COLORS.bone, fontFamily: FONT_MONO }}>{fmtNumber(b.records_affected_est)}</span>
+      : <span style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 12 }}>undisclosed</span>),
+  },
+  {
+    key: 'sources', label: 'Sources', sortKey: 'source_count', align: 'center',
+    text: (b) => String(b.source_count ?? ''),
+    cell: (b) => <span className="text-xs px-2 py-0.5 rounded-full" style={{ fontFamily: FONT_MONO, backgroundColor: COLORS.panelAlt, color: COLORS.boneDim, border: `1px solid ${COLORS.line}` }}>{b.source_count}</span>,
+  },
+  {
+    key: 'severity', label: 'Severity', align: 'left',
+    text: (b) => b.severity || 'unrated',
+    cell: (b) => <SeverityTag severity={b.severity} />,
+  },
+];
+
+const alignClass = (a) => (a === 'right' ? 'text-right' : a === 'center' ? 'text-center' : 'text-left');
+
+export function visibleColumns(hiddenCols = []) {
+  return LEDGER_COLUMNS.filter((c) => c.locked || !hiddenCols.includes(c.key));
+}
+export function rowToTsv(b, cols) { return cols.map((c) => c.text(b)).join('\t'); }
+
+export function LedgerRow({ b, cols, pad, onOpen, onActorClick }) {
+  const [copied, setCopied] = React.useState(false);
+  const copy = (e) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(rowToTsv(b, cols)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1000); });
+  };
+  return (
+    <tr onClick={() => onOpen(b)} className="cursor-pointer transition-colors group hover:bg-white/[0.03]" style={{ borderBottom: `1px solid ${COLORS.lineFaint}` }}>
+      {cols.map((c, i) => (
+        <td key={c.key}
+          className={`${pad} text-sm ${alignClass(c.align)} ${c.align !== 'left' || c.key === 'incident' || c.key === 'disclosed' ? 'whitespace-nowrap' : ''}`}
+          style={{ paddingLeft: i === 0 ? 24 : undefined }}>
+          {c.cell(b, { onActorClick })}
+        </td>
+      ))}
+      <td className={`${pad} text-right whitespace-nowrap`} style={{ paddingRight: 24 }}>
+        <span className="inline-flex items-center gap-2 justify-end">
+          <button onClick={copy} title="Copy row (tab-separated)" aria-label="Copy row"
+            className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: copied ? COLORS.teal : COLORS.boneFaint }}>
+            {copied ? <Check size={13} /> : <Copy size={13} />}
           </button>
-        ) : (
-          <span style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Unattributed</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>
-        {fmtDate(b.incident_date)}
-      </td>
-      <td className="px-4 py-3 text-sm whitespace-nowrap" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>
-        {b.disclosed_date ? fmtDate(b.disclosed_date) : (
-          b.incident_date
-            ? <span title="No separate disclosure date on record; showing incident date" style={{ color: COLORS.boneFaint }}>~{fmtDate(b.incident_date)}</span>
-            : '-'
-        )}
-      </td>
-      <td className="px-4 py-3 text-sm text-right whitespace-nowrap" style={{ fontFamily: FONT_MONO }}>
-        {b.records_affected_est != null
-          ? <span style={{ color: COLORS.bone }}>{fmtNumber(b.records_affected_est)}</span>
-          : <span style={{ color: COLORS.boneFaint, fontSize: 12 }}>undisclosed</span>}
-      </td>
-      <td className="px-4 py-3 text-center">
-        <span
-          className="text-xs px-2 py-0.5 rounded-full"
-          style={{ fontFamily: FONT_MONO, backgroundColor: COLORS.panelAlt, color: COLORS.boneDim, border: `1px solid ${COLORS.line}` }}
-        >
-          {b.source_count}
+          {b.status === 'disputed'
+            ? <Tag style={{ color: COLORS.amber, backgroundColor: 'rgba(217,142,51,0.12)' }}>Disputed</Tag>
+            : <ChevronRight size={15} color={COLORS.boneFaint} className="inline-block" />}
         </span>
-      </td>
-      <td className="px-4 py-3"><SeverityTag severity={b.severity} /></td>
-      <td className="px-6 py-3 text-right">
-        {b.status === 'disputed' ? (
-          <Tag style={{ color: COLORS.amber, backgroundColor: 'rgba(217,142,51,0.12)' }}>Disputed</Tag>
-        ) : (
-          <ChevronRight size={15} color={COLORS.boneFaint} className="inline-block" />
-        )}
       </td>
     </tr>
   );
@@ -465,53 +496,46 @@ export function LedgerCard({ b, onOpen, onActorClick }) {
   );
 }
 
-export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setPage, total, pageSize, sortBy, sortDir, onSort }) {
-  const headers = [
-    { label: 'Company', key: null },
-    { label: 'Threat actor', key: null },
-    { label: 'Incident', key: 'incident_date' },
-    { label: 'Disclosed', key: 'disclosed_date' },
-    { label: 'Records', key: 'records_affected_est', right: true },
-    { label: 'Sources', key: 'source_count', center: true },
-    { label: 'Severity', key: null },
-    { label: '', key: null },
-  ];
+export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setPage, total, pageSize, sortBy, sortDir, onSort, hiddenCols = [], density = 'comfortable' }) {
+  const cols = visibleColumns(hiddenCols);
+  const pad = density === 'compact' ? 'px-4 py-1.5' : 'px-4 py-3';
   const startIdx = (page - 1) * pageSize + 1;
   const endIdx = Math.min(page * pageSize, total);
 
   return (
     <div>
-      {/* Desktop: full sortable table. Hidden below md, where an 8-column
+      {/* Desktop: full sortable table. Hidden below md, where a multi-column
           table is unusable — a card list renders instead. */}
       <div className="overflow-x-auto hidden md:block">
         <table className="w-full" style={{ borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-              {headers.map((h, i) => (
+              {cols.map((c, i) => (
                 <th
-                  key={i}
-                  className={`px-4 py-2 text-xs uppercase font-medium whitespace-nowrap ${h.right ? 'text-right' : h.center ? 'text-center' : 'text-left'}`}
+                  key={c.key}
+                  className={`px-4 py-2 text-xs uppercase font-medium whitespace-nowrap ${alignClass(c.align)}`}
                   style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.06em', ...(i === 0 ? { paddingLeft: 24 } : {}) }}
                 >
-                  {h.key ? (
+                  {c.sortKey ? (
                     <button
-                      onClick={() => onSort?.(h.key)}
+                      onClick={() => onSort?.(c.sortKey)}
                       className="uppercase hover:underline inline-flex items-center gap-1"
-                      title={`Sort by ${h.label.toLowerCase()}`}
+                      title={`Sort by ${c.label.toLowerCase()}`}
                       style={{
                         fontFamily: FONT_MONO, letterSpacing: '0.06em',
-                        color: sortBy === h.key ? COLORS.amber : COLORS.boneFaint,
+                        color: sortBy === c.sortKey ? COLORS.amber : COLORS.boneFaint,
                       }}
                     >
-                      {h.label}{sortBy === h.key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+                      {c.label}{sortBy === c.sortKey ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
                     </button>
-                  ) : h.label}
+                  ) : c.label}
                 </th>
               ))}
+              <th className="px-6 py-2" />
             </tr>
           </thead>
           <tbody>
-            {rows.map((b) => <LedgerRow key={b.id} b={b} onOpen={onOpen} onActorClick={onActorClick} />)}
+            {rows.map((b) => <LedgerRow key={b.id} b={b} cols={cols} pad={pad} onOpen={onOpen} onActorClick={onActorClick} />)}
           </tbody>
         </table>
       </div>
@@ -554,6 +578,87 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
             <ChevronRight size={14} color={COLORS.boneDim} />
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Desktop table controls: row density, column show/hide, copy-page, and named
+// saved views (filters + sort + columns + density persisted in localStorage).
+export function TableToolbar({ density, setDensity, hiddenCols, setHiddenCols, rows, views, onSaveView, onApplyView, onDeleteView }) {
+  const [menu, setMenu] = React.useState(null);
+  const [copied, setCopied] = React.useState(false);
+  const cols = visibleColumns(hiddenCols);
+  const toggleCol = (key) =>
+    setHiddenCols(hiddenCols.includes(key) ? hiddenCols.filter((k) => k !== key) : [...hiddenCols, key]);
+  const copyPage = () => {
+    const header = cols.map((c) => c.label).join('\t');
+    const body = (rows || []).map((b) => rowToTsv(b, cols)).join('\n');
+    navigator.clipboard?.writeText([header, body].filter(Boolean).join('\n'))
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); });
+  };
+  const chip = { fontFamily: FONT_MONO, color: COLORS.boneDim, border: `1px solid ${COLORS.line}` };
+
+  return (
+    <div className="hidden md:flex items-center gap-2 px-6 py-2 relative" style={{ borderBottom: `1px solid ${COLORS.lineFaint}` }}>
+      <div className="inline-flex rounded-md overflow-hidden" style={{ border: `1px solid ${COLORS.line}` }} title="Row density">
+        {['comfortable', 'compact'].map((d) => (
+          <button key={d} onClick={() => setDensity(d)} className="text-xs px-2 py-1"
+            style={{ fontFamily: FONT_MONO, color: density === d ? COLORS.ink : COLORS.boneDim, backgroundColor: density === d ? COLORS.amber : 'transparent' }}>
+            {d === 'comfortable' ? 'Comfortable' : 'Compact'}
+          </button>
+        ))}
+      </div>
+
+      <div className="relative">
+        <button onClick={() => setMenu(menu === 'cols' ? null : 'cols')} className="inline-flex items-center gap-1 rounded-md text-xs px-2 py-1" style={chip}>
+          <SlidersHorizontal size={12} /> Columns <ChevronDown size={11} />
+        </button>
+        {menu === 'cols' && (
+          <div className="absolute z-30 mt-1 rounded-md p-1" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}`, minWidth: 180 }}>
+            {LEDGER_COLUMNS.map((c) => {
+              const shown = c.locked || !hiddenCols.includes(c.key);
+              return (
+                <button key={c.key} disabled={c.locked} onClick={() => toggleCol(c.key)}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs rounded hover:bg-white/[0.04] disabled:opacity-50"
+                  style={{ fontFamily: FONT_BODY, color: COLORS.bone }}>
+                  <span style={{ width: 12, display: 'inline-flex' }}>{shown ? <Check size={12} color={COLORS.teal} /> : null}</span>
+                  {c.label}{c.locked ? ' · locked' : ''}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <button onClick={copyPage} title="Copy this page as tab-separated values (with header)"
+        className="inline-flex items-center gap-1 rounded-md text-xs px-2 py-1" style={{ ...chip, color: copied ? COLORS.teal : COLORS.boneDim }}>
+        {copied ? <Check size={12} /> : <Copy size={12} />} Copy page
+      </button>
+
+      <div className="relative ml-auto">
+        <button onClick={() => setMenu(menu === 'views' ? null : 'views')} className="inline-flex items-center gap-1 rounded-md text-xs px-2 py-1" style={chip}>
+          <Save size={12} /> Views <ChevronDown size={11} />
+        </button>
+        {menu === 'views' && (
+          <div className="absolute right-0 z-30 mt-1 rounded-md p-1" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}`, minWidth: 220 }}>
+            <button onClick={() => { setMenu(null); onSaveView(); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs rounded hover:bg-white/[0.04]" style={{ fontFamily: FONT_BODY, color: COLORS.teal }}>
+              <Save size={12} /> Save current view…
+            </button>
+            {(views || []).length > 0 && <div style={{ borderTop: `1px solid ${COLORS.lineFaint}`, margin: '4px 0' }} />}
+            {(views || []).map((v) => (
+              <div key={v.name} className="flex items-center gap-1">
+                <button onClick={() => { setMenu(null); onApplyView(v); }} className="flex-1 text-left text-xs px-2 py-1.5 rounded truncate hover:bg-white/[0.04]" style={{ fontFamily: FONT_BODY, color: COLORS.bone }} title="Apply this view">
+                  {v.name}
+                </button>
+                <button onClick={() => onDeleteView(v.name)} title="Delete view" className="px-1.5 py-1 rounded" style={{ color: COLORS.boneFaint }}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+            {(views || []).length === 0 && <div className="px-2 py-1.5 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>No saved views yet.</div>}
+          </div>
+        )}
       </div>
     </div>
   );
