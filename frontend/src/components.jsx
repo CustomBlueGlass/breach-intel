@@ -120,10 +120,10 @@ export function TopBar({ tab, setTab, pendingCount, watchCount }) {
   ];
   return (
     <header
-      className="sticky top-0 z-20 flex items-center justify-between px-6 py-3"
+      className="sticky top-0 z-20 flex items-center gap-2 px-4 sm:px-6 py-3"
       style={{ backgroundColor: COLORS.ink, borderBottom: `1px solid ${COLORS.line}` }}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 shrink-0">
         <div
           className="flex items-center justify-center rounded"
           style={{ width: 30, height: 30, backgroundColor: COLORS.amber }}
@@ -134,12 +134,12 @@ export function TopBar({ tab, setTab, pendingCount, watchCount }) {
           Ledger<span style={{ color: COLORS.amber }}>//</span>Breach
         </span>
       </div>
-      <nav className="flex items-center gap-1">
+      <nav className="no-scrollbar flex items-center gap-1 overflow-x-auto min-w-0 ml-auto">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className="px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2 transition-colors"
+            className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2 transition-colors"
             style={{
               fontFamily: FONT_BODY,
               color: tab === t.id ? COLORS.ink : COLORS.boneDim,

@@ -277,13 +277,15 @@ export default function App() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div style={{ backgroundColor: COLORS.ink, minHeight: '100vh', fontFamily: "'Inter', sans-serif" }}>
+    <div style={{ backgroundColor: COLORS.ink, minHeight: '100vh', fontFamily: "'Inter', sans-serif", overflowX: 'clip' }}>
       <style>{`
         @media (prefers-reduced-motion: reduce) { .motion-safe-pulse { animation: none !important; } }
         .motion-safe-pulse { animation: ping 1.8s cubic-bezier(0,0,0.2,1) infinite; }
         @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
         select option { background-color: ${COLORS.panel}; }
         ::selection { background-color: ${COLORS.amber}; color: ${COLORS.ink}; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
       `}</style>
 
       <TopBar tab={tab} setTab={setTab} pendingCount={queueItems.length} watchCount={watchCount} />
