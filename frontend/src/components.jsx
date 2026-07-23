@@ -721,6 +721,32 @@ function CopyButton({ getText, label, Icon = Copy }) {
   );
 }
 
+// A chronological timeline for the dossier, assembled from the incident and
+// disclosure dates plus every dated source and news mention. Deduped by
+// date+label and sorted oldest-first.
+const TIMELINE_KIND = {
+  incident: COLORS.amber,
+  disclosed: COLORS.teal,
+  source: COLORS.boneDim,
+  news: COLORS.boneFaint,
+};
+function buildTimeline(breach) {
+  const events = [];
+  const add = (date, label, kind) => {
+    if (!date) return;
+    const d = String(date).slice(0, 10);
+    if (d && d !== 'null') events.push({ date: d, label, kind });
+  };
+  add(breach.incident_date, 'Incident date', 'incident');
+  add(breach.disclosed_date, 'Publicly disclosed', 'disclosed');
+  for (const s of breach.linked_sources || []) add(s.published_at, `Reported · ${s.source_name || s.source_category || 'source'}`, 'source');
+  for (const n of breach.related_news || []) add(n.published_at, `News · ${n.source_name || 'press'}`, 'news');
+  const seen = new Set();
+  return events
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .filter((e) => { const k = e.date + '|' + e.label; if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
 export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, onOpenActor, isWatched, onToggleWatch }) {
   if (!isOpen) return null;
   if (loading || !breach) {
@@ -847,6 +873,28 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
             </div>
           ))}
         </div>
+
+        {(() => {
+          const events = buildTimeline(breach);
+          if (events.length < 2) return null;
+          return (
+            <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+              <div className="text-xs uppercase tracking-widest mb-3" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+                Timeline
+              </div>
+              <div className="relative pl-4">
+                <div className="absolute top-1 bottom-1" style={{ left: 3, width: 1, backgroundColor: COLORS.line }} />
+                {events.map((e, i) => (
+                  <div key={i} className="relative flex items-baseline gap-3 pb-2.5 last:pb-0">
+                    <span className="absolute rounded-full" style={{ left: -13, top: 5, width: 7, height: 7, backgroundColor: TIMELINE_KIND[e.kind] || COLORS.boneFaint }} />
+                    <span className="text-xs shrink-0" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO, width: 96 }}>{fmtDate(e.date)}</span>
+                    <span className="text-sm" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>{e.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {(breach.data_types_exposed || []).length > 0 && (
           <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
@@ -1125,7 +1173,7 @@ export function MatchQueueView({ items }) {
 
 /* --------------------------------- footer ----------------------------------- */
 
-export function Footer() {
+export function Footer({ onAbout }) {
   const categories = [...new Set(Object.keys(SOURCE_CATEGORY_META))];
   return (
     <footer className="px-6 py-6" style={{ borderTop: `1px solid ${COLORS.line}` }}>
@@ -1140,9 +1188,16 @@ export function Footer() {
             );
           })}
         </div>
-        <span className="text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}>
-          Sources re-ingested every 6 hours
-        </span>
+        <div className="flex items-center gap-4">
+          {onAbout && (
+            <button onClick={onAbout} className="text-xs hover:underline" style={{ fontFamily: FONT_MONO, color: COLORS.boneDim }}>
+              About
+            </button>
+          )}
+          <span className="text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}>
+            Sources re-ingested every 6 hours
+          </span>
+        </div>
       </div>
     </footer>
   );
