@@ -102,6 +102,8 @@ CREATE TABLE breaches (
     disclosed_date      DATE,
     records_affected_est BIGINT,
     data_types_exposed  TEXT[],
+    cves                TEXT[] NOT NULL DEFAULT '{}',   -- CVE ids parsed from source text
+    attack_techniques   TEXT[] NOT NULL DEFAULT '{}',   -- MITRE ATT&CK technique ids inferred from source text
     severity            TEXT CHECK (severity IN ('low','moderate','high','critical')),
     status              TEXT NOT NULL DEFAULT 'confirmed'
                             CHECK (status IN ('confirmed','disputed','retracted')),

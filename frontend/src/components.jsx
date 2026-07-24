@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import {
   COLORS, FONT_DISPLAY, FONT_BODY, FONT_MONO,
-  INDUSTRY_LABELS, SOURCE_CATEGORY_META, SEVERITY_META,
+  INDUSTRY_LABELS, SOURCE_CATEGORY_META, SEVERITY_META, ATTACK_NAMES,
   fmtNumber, fmtDate, fmtDateTime, relativeTime,
 } from './constants';
 
@@ -976,6 +976,44 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
                 </Tag>
               ))}
             </div>
+          </div>
+        )}
+
+        {(breach.cves || []).length > 0 && (
+          <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <div className="text-xs uppercase tracking-widest mb-2" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+              Exploited vulnerabilities
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {breach.cves.map((cve) => (
+                <a key={cve} href={`https://nvd.nist.gov/vuln/detail/${cve}`} target="_blank" rel="noopener noreferrer"
+                   className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded hover:underline"
+                   style={{ fontFamily: FONT_MONO, color: COLORS.red, backgroundColor: 'rgba(192,71,58,0.12)', border: `1px solid ${COLORS.line}` }}
+                   title="Open on the NVD">
+                  <ExternalLink size={10} /> {cve}
+                </a>
+              ))}
+            </div>
+            <div className="mt-1.5 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Parsed from source reporting; links to the NVD.</div>
+          </div>
+        )}
+
+        {(breach.attack_techniques || []).length > 0 && (
+          <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <div className="text-xs uppercase tracking-widest mb-2" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+              MITRE ATT&amp;CK
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {breach.attack_techniques.map((tid) => (
+                <a key={tid} href={`https://attack.mitre.org/techniques/${tid.replace('.', '/')}`} target="_blank" rel="noopener noreferrer"
+                   className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded hover:underline"
+                   style={{ fontFamily: FONT_MONO, color: COLORS.teal, backgroundColor: 'rgba(79,157,140,0.12)', border: `1px solid ${COLORS.line}` }}
+                   title={ATTACK_NAMES[tid] || tid}>
+                  <ExternalLink size={10} /> {tid}{ATTACK_NAMES[tid] ? ` · ${ATTACK_NAMES[tid]}` : ''}
+                </a>
+              ))}
+            </div>
+            <div className="mt-1.5 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Techniques inferred from source reporting; links to MITRE ATT&amp;CK.</div>
           </div>
         )}
 

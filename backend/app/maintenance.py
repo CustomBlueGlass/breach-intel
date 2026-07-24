@@ -29,6 +29,7 @@ from sqlalchemy import text
 from app.collectors.registry import NOT_YET_IMPLEMENTED_SLUGS, PLACEHOLDER_HTML_SLUGS
 from app.correlation.merge import BREACH_CREATING_DOC_TYPES, recompute_severity
 from app.db import get_session
+from app.normalize.attack_cve import extract_cves, map_techniques
 from app.normalize.company_name import normalize_company_name
 from app.normalize.ransomware_group_aliases import normalize_ransomware_group
 
@@ -565,14 +566,69 @@ async def recompute_denormalized(session) -> None:
 DDL_ADVISORY_LOCK = 918273645
 
 
+# Columns added after the original schema. Guarded so the ALTER (and its
+# exclusive lock) only runs the first time, then is a catalog no-op.
+ENSURE_BREACH_COLUMNS = """
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='breaches' AND column_name='cves') THEN
+        ALTER TABLE breaches ADD COLUMN cves TEXT[] NOT NULL DEFAULT '{}';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='breaches' AND column_name='attack_techniques') THEN
+        ALTER TABLE breaches ADD COLUMN attack_techniques TEXT[] NOT NULL DEFAULT '{}';
+    END IF;
+END $$
+"""
+
+
 async def ensure_views(session) -> None:
-    # Take the DDL lock first, before CREATE MATERIALIZED VIEW / GRANT / ALTER
+    # Take the DDL lock first, before ALTER / CREATE MATERIALIZED VIEW / GRANT
     # below acquire any table locks.
     await session.execute(text("SELECT pg_advisory_xact_lock(CAST(:k AS bigint))"), {"k": DDL_ADVISORY_LOCK})
+    await session.execute(text(ENSURE_BREACH_COLUMNS))
     await session.execute(text(PLATFORM_STATS_VIEW))
     await session.execute(text(REFRESH_FUNCTION))
     await session.execute(text(GRANT_STATS_VIEW))
     await session.execute(text(ENSURE_PUBLIC_READ))
+
+
+async def backfill_attack_cve(session) -> None:
+    """
+    Tag each breach with the CVEs and MITRE ATT&CK techniques derivable from
+    its linked sources' text (titles/summaries/AG-letter payloads). CVEs are
+    matched by identifier; techniques are inferred from breach-reporting
+    language (see normalize/attack_cve.py). Idempotent — only writes on change.
+    """
+    from collections import defaultdict
+
+    rows = (await session.execute(
+        text(
+            "SELECT matched_breach_id AS bid, summary, company_name_raw, raw_payload::text AS rp "
+            "FROM breach_source_records WHERE matched_breach_id IS NOT NULL"
+        )
+    )).fetchall()
+
+    texts: dict[str, list[str]] = defaultdict(list)
+    for r in rows:
+        texts[str(r.bid)].append(" ".join(x for x in (r.summary, r.company_name_raw, r.rp) if x))
+
+    updated = 0
+    for bid, parts in texts.items():
+        blob = " ".join(parts)
+        cves = extract_cves(blob)
+        techs = map_techniques(blob)
+        res = await session.execute(
+            text(
+                "UPDATE breaches SET cves = CAST(:cves AS text[]), attack_techniques = CAST(:techs AS text[]) "
+                "WHERE id = :bid AND (cves IS DISTINCT FROM CAST(:cves AS text[]) "
+                "OR attack_techniques IS DISTINCT FROM CAST(:techs AS text[]))"
+            ),
+            {"cves": cves, "techs": techs, "bid": bid},
+        )
+        if res.rowcount:
+            updated += 1
+    if updated:
+        logger.info("Tagged %d breaches with CVEs / ATT&CK techniques from source text", updated)
 
 
 async def run_maintenance() -> None:
@@ -596,6 +652,8 @@ async def run_maintenance() -> None:
         await recompute_denormalized(session)
     async with get_session() as session:
         await ensure_views(session)
+    async with get_session() as session:
+        await backfill_attack_cve(session)
     async with get_session() as session:
         await session.execute(text("SELECT refresh_breach_views()"))
     logger.info("Maintenance pass complete.")
