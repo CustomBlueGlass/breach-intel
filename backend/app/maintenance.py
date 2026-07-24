@@ -74,6 +74,11 @@ RE_ENABLE_SOURCES = {
         "feed_type": "html_scrape",
         "note": "Oregon DOJ breach notification table at justice.oregon.gov (positional HTML parse)",
     },
+    "california_oag": {
+        "feed_url": None,
+        "feed_type": "html_scrape",
+        "note": "CA OAG SB24 breach list: hand-tuned ScrapeConfig (views-table row parse), capped to recent rows",
+    },
     "haveibeenpwned": {
         "feed_url": "https://haveibeenpwned.com/api/v3/breaches",
         "feed_type": "json_api",
@@ -182,6 +187,16 @@ END $$
 
 
 async def fix_sources(session) -> None:
+    # Source names show on breach pages; normalize em/en dashes in them to a
+    # plain hyphen so the UI stays dash-free (0x2014 = em dash, 0x2013 = en).
+    em, en = chr(0x2014), chr(0x2013)
+    await session.execute(
+        text(
+            "UPDATE breach_data_sources SET name = replace(replace(name, :em, '-'), :en, '-') "
+            "WHERE name LIKE :emlike OR name LIKE :enlike"
+        ),
+        {"em": em, "en": en, "emlike": f"%{em}%", "enlike": f"%{en}%"},
+    )
     for slug, url in URL_FIXES.items():
         await session.execute(
             text("UPDATE breach_data_sources SET base_url = :url WHERE slug = :slug AND base_url <> :url"),
