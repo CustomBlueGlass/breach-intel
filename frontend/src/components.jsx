@@ -427,8 +427,18 @@ export const COL_DEFAULT_WIDTH = { company: 320, actor: 160, incident: 120, disc
 const ACTIONS_WIDTH = 84;
 const colWidthOf = (widths, key) => widths[key] ?? COL_DEFAULT_WIDTH[key] ?? 120;
 
-export function visibleColumns(hiddenCols = []) {
-  return LEDGER_COLUMNS.filter((c) => c.locked || !hiddenCols.includes(c.key));
+// Apply a saved column order (array of keys); unknown/new columns keep their
+// registry order at the end. Empty order => registry default.
+export function orderColumns(order = []) {
+  if (!order || !order.length) return LEDGER_COLUMNS;
+  const byKey = Object.fromEntries(LEDGER_COLUMNS.map((c) => [c.key, c]));
+  const ordered = order.map((k) => byKey[k]).filter(Boolean);
+  for (const c of LEDGER_COLUMNS) if (!ordered.includes(c)) ordered.push(c);
+  return ordered;
+}
+
+export function visibleColumns(hiddenCols = [], order = []) {
+  return orderColumns(order).filter((c) => c.locked || !hiddenCols.includes(c.key));
 }
 export function rowToTsv(b, cols) { return cols.map((c) => c.text(b)).join('\t'); }
 
@@ -497,8 +507,8 @@ export function LedgerCard({ b, onOpen, onActorClick }) {
   );
 }
 
-export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setPage, total, pageSize, sortBy, sortDir, onSort, hiddenCols = [], density = 'comfortable', colWidths = {}, onColResize }) {
-  const cols = visibleColumns(hiddenCols);
+export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setPage, total, pageSize, sortBy, sortDir, onSort, hiddenCols = [], density = 'comfortable', colWidths = {}, onColResize, colOrder = [], onColReorder }) {
+  const cols = visibleColumns(hiddenCols, colOrder);
   const pad = density === 'compact' ? 'px-4 py-1.5' : 'px-4 py-3';
   const startIdx = (page - 1) * pageSize + 1;
   const endIdx = Math.min(page * pageSize, total);
@@ -537,8 +547,12 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
               {cols.map((c, i) => (
                 <th
                   key={c.key}
+                  draggable={!!onColReorder}
+                  onDragStart={(e) => { e.dataTransfer.setData('text/plain', c.key); e.dataTransfer.effectAllowed = 'move'; }}
+                  onDragOver={(e) => { if (onColReorder) e.preventDefault(); }}
+                  onDrop={(e) => { e.preventDefault(); const from = e.dataTransfer.getData('text/plain'); if (from && onColReorder) onColReorder(from, c.key); }}
                   className={`relative px-4 py-2 text-xs uppercase font-medium whitespace-nowrap overflow-hidden ${alignClass(c.align)}`}
-                  style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.06em', ...(i === 0 ? { paddingLeft: 24 } : {}) }}
+                  style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.06em', cursor: onColReorder ? 'grab' : undefined, ...(i === 0 ? { paddingLeft: 24 } : {}) }}
                 >
                   {c.sortKey ? (
                     <button
@@ -556,6 +570,8 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
                   {onColResize && (
                     <span
                       onMouseDown={(e) => startResize(c.key, e)}
+                      draggable={false}
+                      onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
                       title="Drag to resize column"
                       className="absolute top-0 h-full"
                       style={{ right: -3, width: 7, cursor: 'col-resize', zIndex: 1 }}
@@ -617,10 +633,10 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
 
 // Desktop table controls: row density, column show/hide, copy-page, and named
 // saved views (filters + sort + columns + density persisted in localStorage).
-export function TableToolbar({ density, setDensity, hiddenCols, setHiddenCols, rows, views, onSaveView, onApplyView, onDeleteView, onResetWidths }) {
+export function TableToolbar({ density, setDensity, hiddenCols, setHiddenCols, colOrder = [], rows, views, onSaveView, onApplyView, onDeleteView, onResetLayout }) {
   const [menu, setMenu] = React.useState(null);
   const [copied, setCopied] = React.useState(false);
-  const cols = visibleColumns(hiddenCols);
+  const cols = visibleColumns(hiddenCols, colOrder);
   const toggleCol = (key) =>
     setHiddenCols(hiddenCols.includes(key) ? hiddenCols.filter((k) => k !== key) : [...hiddenCols, key]);
   const copyPage = () => {
@@ -659,14 +675,15 @@ export function TableToolbar({ density, setDensity, hiddenCols, setHiddenCols, r
                 </button>
               );
             })}
-            {onResetWidths && (
+            {onResetLayout && (
               <>
                 <div style={{ borderTop: `1px solid ${COLORS.lineFaint}`, margin: '4px 0' }} />
-                <button onClick={() => { setMenu(null); onResetWidths(); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs rounded hover:bg-white/[0.04]" style={{ fontFamily: FONT_BODY, color: COLORS.boneDim }}>
-                  Reset column widths
+                <button onClick={() => { setMenu(null); onResetLayout(); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs rounded hover:bg-white/[0.04]" style={{ fontFamily: FONT_BODY, color: COLORS.boneDim }}>
+                  Reset column layout
                 </button>
               </>
             )}
+            <div className="px-2 py-1 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>Drag a header to reorder · drag its edge to resize.</div>
           </div>
         )}
       </div>
