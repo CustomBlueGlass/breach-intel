@@ -70,6 +70,15 @@ export const SEVERITY_META = {
   unrated: { label: 'Unrated', text: COLORS.boneFaint, bg: 'rgba(107,114,128,0.12)' },
 };
 
+// MITRE ATT&CK technique display names (mirrors backend attack_cve.py).
+export const ATTACK_NAMES = {
+  T1078: 'Valid Accounts', T1110: 'Brute Force', T1133: 'External Remote Services',
+  T1190: 'Exploit Public-Facing Application', T1195: 'Supply Chain Compromise',
+  T1204: 'User Execution', T1213: 'Data from Information Repositories',
+  T1486: 'Data Encrypted for Impact', T1530: 'Data from Cloud Storage',
+  T1566: 'Phishing', T1567: 'Exfiltration Over Web Service', T1657: 'Financial Theft',
+};
+
 export function fmtNumber(n) {
   if (n == null) return '-';
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
