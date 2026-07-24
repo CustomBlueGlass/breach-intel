@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useGoogleFonts, COLORS } from './constants';
 import {
   TopBar, Hero, FilterBar, LedgerTable, TableToolbar, BreachDetailDrawer,
-  AnalyticsView, MatchQueueView, Footer,
+  AnalyticsView, MatchQueueView, Footer, orderColumns,
 } from './components';
 import { ToolsView } from './tools';
 import { CommandPalette } from './palette';
@@ -89,6 +89,15 @@ export default function App() {
   const [savedViews, setSavedViews] = usePersisted('bi.views', []);
   const [colWidths, setColWidths] = usePersisted('bi.colWidths', {});
   const onColResize = (key, w) => setColWidths((c) => ({ ...c, [key]: w }));
+  const [colOrder, setColOrder] = usePersisted('bi.colOrder', []);
+  function onColReorder(fromKey, toKey) {
+    const current = orderColumns(colOrder).map((c) => c.key);
+    const from = current.indexOf(fromKey), to = current.indexOf(toKey);
+    if (from < 0 || to < 0 || from === to) return;
+    const next = [...current];
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    setColOrder(next);
+  }
 
   // Analyst workspace: watchlist + recently-viewed (persisted, browser-local).
   const [watchlist, setWatchlist] = usePersisted('bi.watchlist', { breaches: [], actors: [] });
@@ -321,9 +330,10 @@ export default function App() {
               <TableToolbar
                 density={density} setDensity={setDensity}
                 hiddenCols={hiddenCols} setHiddenCols={setHiddenCols}
+                colOrder={colOrder}
                 rows={loadingList ? [] : rows}
                 views={savedViews} onSaveView={saveView} onApplyView={applyView} onDeleteView={deleteView}
-                onResetWidths={() => setColWidths({})}
+                onResetLayout={() => { setColOrder([]); setColWidths({}); }}
               />
               <LedgerTable
                 rows={loadingList ? [] : rows}
@@ -334,6 +344,7 @@ export default function App() {
                 sortBy={sortBy} sortDir={sortDir} onSort={sortByColumn}
                 hiddenCols={hiddenCols} density={density}
                 colWidths={colWidths} onColResize={onColResize}
+                colOrder={colOrder} onColReorder={onColReorder}
               />
             </>
           )}
