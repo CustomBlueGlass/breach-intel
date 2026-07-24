@@ -38,6 +38,7 @@ class ScrapeConfig:
     document_type: str = "ag_notification_letter"
     pagination_param: str | None = None  # e.g. "page" — appended as ?page=N
     max_pages: int = 5
+    max_rows: int | None = None  # cap records (for huge single-page tables)
 
 
 class HTMLFallbackCollector(BaseCollector):
@@ -91,6 +92,8 @@ class HTMLFallbackCollector(BaseCollector):
         records = []
         for html in raw:
             for row in self._extract_rows(html):
+                if self.cfg.max_rows is not None and len(records) >= self.cfg.max_rows:
+                    return records
                 rec = self._row_to_record(row)
                 if rec:
                     records.append(rec)

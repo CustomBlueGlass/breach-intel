@@ -1,22 +1,29 @@
 """
-California OAG publishes its breach list as a sortable HTML table with no
-CSV/API export discovered — this is a worked example of the HTML-fallback
-path. The selectors below are illustrative; inspect the live table markup
-before deploying, since a site redesign will silently break a CSS-selector
-scraper (the collector log will show records_fetched=0 when that happens —
-alert on that, don't just retry blindly).
+California OAG publishes every SB24 breach notification as one big static
+HTML table at /privacy/databreach/list (no CSV/JSON export). Verified live
+via .github/workflows/probe.yml: a Drupal "views-table" whose data rows are
+
+  <tr class="odd|even ...">
+    <td class="views-field-field-sb24-org-name"><a href="…/reports/sb24-NNN">Org</a></td>
+    <td class="views-field-field-sb24-breach-date"><span …>MM/DD/YYYY</span>[, …]</td>
+    <td class="views-field-created">MM/DD/YYYY</td>  (date reported to the AG)
+  </tr>
+
+The whole catalogue (~5k rows) renders on a single page, so there is no
+pagination; we cap to the most recent rows (the table is sorted newest-first)
+to keep the first correlation pass from becoming an HIBP-scale storm.
 """
 from app.collectors.html_fallback_collector import HTMLFallbackCollector, ScrapeConfig
 
 CA_OAG_CONFIG = ScrapeConfig(
-    row_selector="table.breach-list tbody tr",
-    company_selector="td.organization-name",
-    date_selector="td.date-reported",
-    link_selector="td.organization-name a",
-    summary_selector="td.breach-description",
+    # Data rows live in <tbody>; the <thead> header row is excluded, and any
+    # stray header still yields no org cell and is skipped.
+    row_selector="table.views-table tbody tr",
+    company_selector="td.views-field-field-sb24-org-name",
+    date_selector="td.views-field-field-sb24-breach-date",
+    link_selector="td.views-field-field-sb24-org-name a",
     document_type="ag_notification_letter",
-    pagination_param="page",
-    max_pages=10,
+    max_rows=800,
 )
 
 
