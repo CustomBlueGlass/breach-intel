@@ -11,7 +11,13 @@ via .github/workflows/probe.yml: a Drupal "views-table" whose data rows are
 
 The whole catalogue (~5k rows) renders on a single page, so there is no
 pagination; we cap to the most recent rows (the table is sorted newest-first)
-to keep the first correlation pass from becoming an HIBP-scale storm.
+rather than push the entire catalogue through candidate correlation in one run.
+
+The first pass (cap 800) is already ingested, and those rows now dedup in
+seconds on their content_fingerprint, so only rows newly exposed by a raised
+cap incur correlation cost. We walk the cap up over successive runs to backfill
+older California breaches a bounded chunk at a time; going straight to ~5k would
+exceed the ingest job's CI timeout (see .github/workflows/ingest.yml).
 """
 from app.collectors.html_fallback_collector import HTMLFallbackCollector, ScrapeConfig
 
@@ -23,7 +29,7 @@ CA_OAG_CONFIG = ScrapeConfig(
     date_selector="td.views-field-field-sb24-breach-date",
     link_selector="td.views-field-field-sb24-org-name a",
     document_type="ag_notification_letter",
-    max_rows=800,
+    max_rows=2000,
 )
 
 

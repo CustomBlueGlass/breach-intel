@@ -28,7 +28,7 @@ from sqlalchemy import text
 
 from app.collectors.registry import NOT_YET_IMPLEMENTED_SLUGS, PLACEHOLDER_HTML_SLUGS
 from app.correlation.merge import BREACH_CREATING_DOC_TYPES, recompute_severity
-from app.db import get_session
+from app.db import get_session, run_resiliently
 from app.normalize.attack_cve import extract_cves, map_techniques
 from app.normalize.company_name import normalize_company_name
 from app.normalize.ransomware_group_aliases import normalize_ransomware_group
@@ -676,4 +676,4 @@ async def run_maintenance() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_maintenance())
+    asyncio.run(run_resiliently(run_maintenance))

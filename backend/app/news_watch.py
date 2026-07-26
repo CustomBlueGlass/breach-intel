@@ -58,7 +58,7 @@ import httpx
 from sqlalchemy import text
 
 from app.collectors.rss_collector import RSSCollector, RSS_HEADERS
-from app.db import get_session
+from app.db import get_session, run_resiliently
 from app.normalize.company_name import normalize_company_name
 
 logger = logging.getLogger("breach_intel.news_watch")
@@ -368,4 +368,4 @@ async def run() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run())
+    asyncio.run(run_resiliently(run))
