@@ -21,7 +21,7 @@ from app.cache import invalidate_all
 from app.collectors.registry import build_collector, collector_available
 from app.config import settings
 from app.correlation.merge import IngestOutcome, ingest_record
-from app.db import get_session
+from app.db import get_session, run_resiliently
 
 logger = logging.getLogger("breach_intel.scheduler")
 
@@ -157,4 +157,4 @@ def start_scheduler() -> AsyncIOScheduler:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_all_collectors())
+    asyncio.run(run_resiliently(run_all_collectors))

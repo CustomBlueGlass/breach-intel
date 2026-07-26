@@ -39,7 +39,7 @@ import os
 import httpx
 from sqlalchemy import text
 
-from app.db import get_session
+from app.db import get_session, run_resiliently
 from app.normalize.date_parser import parse_any_date
 from app.normalize.ransomware_group_aliases import normalize_ransomware_group
 
@@ -289,4 +289,4 @@ async def run() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run())
+    asyncio.run(run_resiliently(run))

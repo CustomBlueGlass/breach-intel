@@ -33,6 +33,28 @@ QUERIES = {
         GROUP BY b.id, b.canonical_name, b.source_count
         ORDER BY count(r.id) DESC LIMIT 10
     """,
+    "source records per source slug": """
+        SELECT s.slug, count(*) AS source_records
+        FROM breach_source_records r
+        JOIN breach_data_sources s ON s.id = r.source_id
+        GROUP BY s.slug ORDER BY 2 DESC
+    """,
+    "breaches touched by california_oag": """
+        SELECT count(DISTINCT r.matched_breach_id)
+        FROM breach_source_records r
+        JOIN breach_data_sources s ON s.id = r.source_id
+        WHERE s.slug = 'california_oag' AND r.matched_breach_id IS NOT NULL
+    """,
+    "breaches sourced ONLY from california_oag (net-new CA entries)": """
+        SELECT count(*) FROM (
+            SELECT r.matched_breach_id
+            FROM breach_source_records r
+            JOIN breach_data_sources s ON s.id = r.source_id
+            WHERE r.matched_breach_id IS NOT NULL
+            GROUP BY r.matched_breach_id
+            HAVING bool_and(s.slug = 'california_oag')
+        ) x
+    """,
     "unlinked source records (never matched)": """
         SELECT count(*) FROM breach_source_records WHERE matched_breach_id IS NULL
     """,
