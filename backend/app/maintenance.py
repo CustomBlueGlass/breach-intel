@@ -646,6 +646,35 @@ async def backfill_attack_cve(session) -> None:
         logger.info("Tagged %d breaches with CVEs / ATT&CK techniques from source text", updated)
 
 
+# Hand-verified corrections to individual breaches. The ledger is machine-built,
+# so a mis-parsed source occasionally needs an override. Corrections live here
+# (reviewed in git, never edited into the database by hand) and run near the end
+# of a maintenance pass, right before the views refresh. Each is idempotent:
+# backfill only fills NULL date fields and merge keeps the earliest date, so once
+# a correct non-NULL value is written nothing overwrites it, and the guarded
+# WHERE clause matches zero rows on later passes.
+async def apply_curated_fixes(session) -> None:
+    # DaVita Inc.: dateutil fuzzy parsing produced an impossible future date
+    # (2027-11-20) for both incident and disclosure, which sorted the row to the
+    # top of the ledger. Authoritative dates: incident 2024-06-17, disclosed
+    # 2024-07-02. Keyed on "DaVita with a future date" so it targets only the
+    # one broken row and leaves the other DaVita incidents' dates untouched.
+    res = await session.execute(
+        text(
+            """
+            UPDATE breaches
+            SET incident_date = DATE '2024-06-17',
+                disclosed_date = DATE '2024-07-02',
+                last_updated_at = now()
+            WHERE canonical_name ILIKE 'davita%'
+              AND (disclosed_date > CURRENT_DATE OR incident_date > CURRENT_DATE)
+            """
+        )
+    )
+    if res.rowcount:
+        logger.info("Applied curated date correction to %d DaVita breach row(s)", res.rowcount)
+
+
 async def run_maintenance() -> None:
     async with get_session() as session:
         await fix_sources(session)
@@ -669,6 +698,8 @@ async def run_maintenance() -> None:
         await ensure_views(session)
     async with get_session() as session:
         await backfill_attack_cve(session)
+    async with get_session() as session:
+        await apply_curated_fixes(session)
     async with get_session() as session:
         await session.execute(text("SELECT refresh_breach_views()"))
     logger.info("Maintenance pass complete.")
