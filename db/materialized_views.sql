@@ -21,6 +21,7 @@ SELECT
     b.status,
     b.source_count,
     b.confidence_avg,
+    b.data_flags,
     b.last_updated_at
 FROM breaches b
 LEFT JOIN breach_companies c ON c.id = b.company_id;

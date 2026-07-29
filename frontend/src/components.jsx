@@ -359,6 +359,24 @@ export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, set
 
 /* -------------------------------- ledger table --------------------------- */
 
+// A breach carries 'date_needs_review' when a source published an impossible
+// date (a typo, e.g. a future year); maintenance blanks the date to UNKNOWN and
+// tags it so the site shows it needs a manual fix instead of a wrong date.
+export const needsDateReview = (b) => Array.isArray(b?.data_flags) && b.data_flags.includes('date_needs_review');
+
+export function DateReviewPill({ compact = false }) {
+  return (
+    <span
+      title="A source published an implausible date (e.g. a future year). The date is shown as unknown pending a manual fix."
+      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5"
+      style={{ color: COLORS.amber, backgroundColor: 'rgba(217,142,51,0.16)', fontFamily: FONT_MONO, fontSize: compact ? 10 : 11 }}
+    >
+      <ShieldAlert size={compact ? 11 : 12} />
+      {compact ? 'date?' : 'date unverified'}
+    </span>
+  );
+}
+
 // Column registry — the single source of truth for the header, each row,
 // column show/hide, copy-row, and copy-page. `cell` renders the table cell;
 // `text` is the plain value used for copy/TSV.
@@ -389,17 +407,21 @@ export const LEDGER_COLUMNS = [
   },
   {
     key: 'incident', label: 'Incident', sortKey: 'incident_date', align: 'left',
-    text: (b) => (b.incident_date ? fmtDate(b.incident_date) : ''),
-    cell: (b) => <span style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>{fmtDate(b.incident_date)}</span>,
+    text: (b) => (b.incident_date ? fmtDate(b.incident_date) : (needsDateReview(b) ? 'unknown (needs review)' : '')),
+    cell: (b) => (!b.incident_date && needsDateReview(b)
+      ? <DateReviewPill compact />
+      : <span style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>{fmtDate(b.incident_date)}</span>),
   },
   {
     key: 'disclosed', label: 'Disclosed', sortKey: 'disclosed_date', align: 'left',
-    text: (b) => (b.disclosed_date ? fmtDate(b.disclosed_date) : (b.incident_date ? `~${fmtDate(b.incident_date)}` : '')),
+    text: (b) => (b.disclosed_date ? fmtDate(b.disclosed_date) : (b.incident_date ? `~${fmtDate(b.incident_date)}` : (needsDateReview(b) ? 'unknown (needs review)' : ''))),
     cell: (b) => (b.disclosed_date
       ? <span style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>{fmtDate(b.disclosed_date)}</span>
       : b.incident_date
         ? <span title="No separate disclosure date on record; showing incident date" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>~{fmtDate(b.incident_date)}</span>
-        : <span style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>-</span>),
+        : needsDateReview(b)
+          ? <DateReviewPill compact />
+          : <span style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>-</span>),
   },
   {
     key: 'records', label: 'Records', sortKey: 'records_affected_est', align: 'right',
@@ -923,10 +945,22 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
           </div>
         </div>
 
+        {needsDateReview(breach) && (
+          <div className="mx-6 mt-4 flex items-start gap-2 rounded px-3 py-2"
+            style={{ backgroundColor: 'rgba(217,142,51,0.12)', border: `1px solid rgba(217,142,51,0.35)` }}>
+            <ShieldAlert size={15} style={{ color: COLORS.amber, marginTop: 1, flexShrink: 0 }} />
+            <div className="text-xs" style={{ color: COLORS.bone, fontFamily: FONT_BODY, lineHeight: 1.5 }}>
+              <span style={{ color: COLORS.amber, fontFamily: FONT_MONO }}>Date needs review.</span>{' '}
+              A source published an implausible date for this breach (e.g. a future year, likely a typo in the
+              original filing). The date is shown as unknown and is pending a manual correction.
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-4 px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
           {[
-            ['Incident date', fmtDate(breach.incident_date)],
-            ['Publicly disclosed', fmtDate(breach.disclosed_date)],
+            ['Incident date', breach.incident_date ? fmtDate(breach.incident_date) : (needsDateReview(breach) ? 'Unknown' : '-')],
+            ['Publicly disclosed', breach.disclosed_date ? fmtDate(breach.disclosed_date) : (needsDateReview(breach) ? 'Unknown' : '-')],
             ['Time to disclosure', disclosureLag(breach.incident_date, breach.disclosed_date)],
             ['Threat actor', breach.ransomware_group || 'Unattributed'],
             ['Records affected (est.)', fmtNumber(breach.records_affected_est)],

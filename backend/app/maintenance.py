@@ -592,6 +592,39 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='breaches' AND column_name='attack_techniques') THEN
         ALTER TABLE breaches ADD COLUMN attack_techniques TEXT[] NOT NULL DEFAULT '{}';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='breaches' AND column_name='data_flags') THEN
+        ALTER TABLE breaches ADD COLUMN data_flags TEXT[] NOT NULL DEFAULT '{}';
+    END IF;
+END $$
+"""
+
+# mv_breach_ledger predates the data_flags column, so a live database has the
+# view without it. It has no dependent objects (the other MVs read base tables),
+# so recreate it once to expose data_flags to the site. Guarded on the view's
+# columns so this drop/create runs only the first time; grants are re-asserted
+# by ENSURE_PUBLIC_READ immediately after.
+ENSURE_LEDGER_HAS_FLAGS = """
+DO $$
+BEGIN
+    -- information_schema.columns does NOT list materialized-view columns, so the
+    -- presence of data_flags must be checked via pg_attribute on the matview.
+    IF EXISTS (SELECT 1 FROM pg_matviews WHERE matviewname='mv_breach_ledger')
+       AND NOT EXISTS (
+           SELECT 1 FROM pg_attribute a
+           JOIN pg_class c ON c.oid = a.attrelid
+           WHERE c.relname='mv_breach_ledger' AND c.relkind='m'
+             AND a.attname='data_flags' AND a.attnum > 0 AND NOT a.attisdropped) THEN
+        DROP MATERIALIZED VIEW mv_breach_ledger CASCADE;
+        CREATE MATERIALIZED VIEW mv_breach_ledger AS
+        SELECT b.id, b.canonical_name, c.domain, b.industry, b.country, b.region_state,
+               b.ransomware_group, b.incident_date, b.disclosed_date, b.records_affected_est,
+               b.severity, b.status, b.source_count, b.confidence_avg, b.data_flags, b.last_updated_at
+        FROM breaches b LEFT JOIN breach_companies c ON c.id = b.company_id;
+        CREATE UNIQUE INDEX idx_mv_ledger_id ON mv_breach_ledger (id);
+        CREATE INDEX idx_mv_ledger_date ON mv_breach_ledger (incident_date DESC);
+        CREATE INDEX idx_mv_ledger_industry ON mv_breach_ledger (industry);
+        CREATE INDEX idx_mv_ledger_group ON mv_breach_ledger (ransomware_group);
+    END IF;
 END $$
 """
 
@@ -601,6 +634,7 @@ async def ensure_views(session) -> None:
     # below acquire any table locks.
     await session.execute(text("SELECT pg_advisory_xact_lock(CAST(:k AS bigint))"), {"k": DDL_ADVISORY_LOCK})
     await session.execute(text(ENSURE_BREACH_COLUMNS))
+    await session.execute(text(ENSURE_LEDGER_HAS_FLAGS))
     await session.execute(text(PLATFORM_STATS_VIEW))
     await session.execute(text(REFRESH_FUNCTION))
     await session.execute(text(GRANT_STATS_VIEW))
@@ -675,6 +709,49 @@ async def apply_curated_fixes(session) -> None:
         logger.info("Applied curated date correction to %d DaVita breach row(s)", res.rowcount)
 
 
+# A date in the future, or before 2000, is implausible for a breach and is
+# almost always a source-side typo (e.g. DaVita's CA OAG notice listing 2027).
+# Rather than silently drop it at parse time or show a wrong date, blank it to
+# UNKNOWN on the breach and tag the breach 'date_needs_review' so the site
+# surfaces it for a manual fix. Also blank the implausible date on the source
+# records so backfill can't reintroduce it. Idempotent, and runs after the
+# curated fixes so a corrected breach is never flagged.
+IMPLAUSIBLE_DATE_PRED = "{col} > CURRENT_DATE + 2 OR {col} < DATE '2000-01-01'"
+
+
+async def flag_implausible_dates(session) -> None:
+    await session.execute(
+        text(
+            "UPDATE breach_source_records SET incident_date = NULL "
+            f"WHERE {IMPLAUSIBLE_DATE_PRED.format(col='incident_date')}"
+        )
+    )
+    inc = IMPLAUSIBLE_DATE_PRED.format(col="incident_date")
+    disc = IMPLAUSIBLE_DATE_PRED.format(col="disclosed_date")
+    res = await session.execute(
+        text(
+            f"""
+            UPDATE breaches SET
+                data_flags = (SELECT array_agg(DISTINCT f)
+                              FROM unnest(data_flags || ARRAY['date_needs_review']) AS f),
+                incident_date = CASE WHEN {inc} THEN NULL ELSE incident_date END,
+                disclosed_date = CASE WHEN {disc} THEN NULL ELSE disclosed_date END
+            WHERE {inc} OR {disc}
+            """
+        )
+    )
+    if res.rowcount:
+        logger.info("Flagged %d breach(es) with implausible source dates for manual date review", res.rowcount)
+    # Clear the tag once a breach has a real date again (e.g. after a curated fix).
+    await session.execute(
+        text(
+            "UPDATE breaches SET data_flags = array_remove(data_flags, 'date_needs_review') "
+            "WHERE 'date_needs_review' = ANY(data_flags) "
+            "AND (incident_date IS NOT NULL OR disclosed_date IS NOT NULL)"
+        )
+    )
+
+
 async def run_maintenance() -> None:
     async with get_session() as session:
         await fix_sources(session)
@@ -700,6 +777,8 @@ async def run_maintenance() -> None:
         await backfill_attack_cve(session)
     async with get_session() as session:
         await apply_curated_fixes(session)
+    async with get_session() as session:
+        await flag_implausible_dates(session)
     async with get_session() as session:
         await session.execute(text("SELECT refresh_breach_views()"))
     logger.info("Maintenance pass complete.")

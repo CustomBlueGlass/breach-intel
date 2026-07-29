@@ -55,7 +55,7 @@ QUERIES = {
             HAVING bool_and(s.slug = 'california_oag')
         ) x
     """,
-    "breaches with future/implausible dates (parser bug)": """
+    "breaches with future/implausible dates (source typo)": """
         SELECT canonical_name, incident_date, disclosed_date, source_count
         FROM breaches
         WHERE disclosed_date > CURRENT_DATE OR incident_date > CURRENT_DATE
@@ -63,6 +63,11 @@ QUERIES = {
             COALESCE(disclosed_date, DATE '0001-01-01'),
             COALESCE(incident_date, DATE '0001-01-01')) DESC
         LIMIT 50
+    """,
+    "breaches tagged date_needs_review": """
+        SELECT canonical_name, incident_date, disclosed_date
+        FROM breaches WHERE 'date_needs_review' = ANY(data_flags)
+        ORDER BY canonical_name LIMIT 50
     """,
     "unlinked source records (never matched)": """
         SELECT count(*) FROM breach_source_records WHERE matched_breach_id IS NULL
