@@ -1,0 +1,35 @@
+name: Run maintenance (idempotent cleanup + curated fixes + view refresh)
+
+# Manual, on-demand maintenance pass. Runs the same idempotent
+# `python -m app.maintenance` that ingest.yml runs first, but WITHOUT the
+# ~40-minute collector pass, so a curated data correction (see
+# app/maintenance.py: apply_curated_fixes) or a view heal can be applied in a
+# couple of minutes. Read/write to the DB only; scrapes nothing.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Database maintenance
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m app.maintenance
