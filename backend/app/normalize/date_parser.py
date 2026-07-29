@@ -9,16 +9,6 @@ from datetime import date, timedelta
 
 from dateutil import parser as dateutil_parser
 
-# A breach cannot be disclosed or have occurred in the future, and this ledger
-# does not track incidents before online breach reporting existed. dateutil's
-# fuzzy=True mode will happily assemble a date from a stray number in prose
-# (a case number, a ZIP+4, a report id), producing impossible values like
-# 2027-11-20 that then sort to the top of the ledger. Discard anything outside
-# this window rather than poison the data. The small future grace absorbs
-# timezone edges around "today".
-_MIN_PLAUSIBLE_YEAR = 2000
-_FUTURE_GRACE_DAYS = 2
-
 _INLINE_DATE_RE = re.compile(
     r"(January|February|March|April|May|June|July|August|September|"
     r"October|November|December)\s+\d{1,2},?\s+\d{4}"
@@ -29,17 +19,35 @@ _INLINE_DATE_RE = re.compile(
 
 
 def parse_any_date(text: str | None) -> date | None:
+    """Parse a date from a source string as faithfully as possible. Sources
+    occasionally publish an impossible date (a typo — e.g. a CA OAG notice that
+    lists 2027 as the breach year). We record what the source said here; the
+    maintenance pass (flag_implausible_dates) is what blanks such a value to
+    UNKNOWN on the breach and tags it for manual review, so a bad date is
+    surfaced for correction rather than silently altered at parse time."""
     if not text:
         return None
     match = _INLINE_DATE_RE.search(text)
     candidate = match.group(0) if match else text
     try:
-        parsed = dateutil_parser.parse(candidate, fuzzy=True).date()
+        return dateutil_parser.parse(candidate, fuzzy=True).date()
     except (ValueError, OverflowError):
         return None
-    if parsed.year < _MIN_PLAUSIBLE_YEAR or parsed > date.today() + timedelta(days=_FUTURE_GRACE_DAYS):
-        return None
-    return parsed
+
+
+# A breach cannot have occurred or been disclosed in the future, and this ledger
+# does not track incidents before online breach reporting existed. A date
+# outside this window is a source typo. Kept in one place so the Python side and
+# the maintenance SQL agree on what "implausible" means.
+MIN_PLAUSIBLE_YEAR = 2000
+FUTURE_GRACE_DAYS = 2
+
+
+def is_plausible_date(d: date | None) -> bool:
+    """False for a missing, future, or pre-2000 date (i.e. a source typo)."""
+    if d is None:
+        return False
+    return d.year >= MIN_PLAUSIBLE_YEAR and d <= date.today() + timedelta(days=FUTURE_GRACE_DAYS)
 
 
 def days_between(a: date | None, b: date | None) -> int | None:

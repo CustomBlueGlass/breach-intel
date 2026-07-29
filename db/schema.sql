@@ -104,6 +104,7 @@ CREATE TABLE breaches (
     data_types_exposed  TEXT[],
     cves                TEXT[] NOT NULL DEFAULT '{}',   -- CVE ids parsed from source text
     attack_techniques   TEXT[] NOT NULL DEFAULT '{}',   -- MITRE ATT&CK technique ids inferred from source text
+    data_flags          TEXT[] NOT NULL DEFAULT '{}',   -- data-quality tags surfaced on the site, e.g. 'date_needs_review'
     severity            TEXT CHECK (severity IN ('low','moderate','high','critical')),
     status              TEXT NOT NULL DEFAULT 'confirmed'
                             CHECK (status IN ('confirmed','disputed','retracted')),
