@@ -329,7 +329,7 @@ export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, set
           { value: 'incident_date', label: 'Sort: Incident date' },
           { value: 'records_affected_est', label: 'Sort: Records affected' },
           { value: 'source_count', label: 'Sort: Source count' },
-          { value: 'confidence_avg', label: 'Sort: Confidence' },
+          { value: 'confidence_avg', label: 'Sort: Source-match confidence' },
         ]}
       />
       <span className="ml-auto text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}>
@@ -967,10 +967,12 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
             ['Location', [breach.region_state, breach.country].filter(Boolean).join(', ') || '-'],
             ['Status', (breach.status || 'confirmed').replace(/^./, (c) => c.toUpperCase())],
             ['Correlated sources', breach.source_count],
-            ['Avg. match confidence', breach.confidence_avg != null ? `${Math.round(breach.confidence_avg * 100)}%` : '-'],
-          ].map(([label, val]) => (
+            ['Source-match confidence',
+              breach.confidence_avg != null ? `${Math.round(breach.confidence_avg * 100)}%` : '-',
+              'How confidently the correlated sources above were matched as the same breach (average across those sources).'],
+          ].map(([label, val, tip]) => (
             <div key={label}>
-              <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>{label}</div>
+              <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }} title={tip || undefined}>{label}</div>
               <div className="text-sm mt-0.5" style={{ color: COLORS.bone, fontFamily: FONT_MONO }}>{val}</div>
             </div>
           ))}
