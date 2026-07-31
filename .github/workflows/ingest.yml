@@ -1,8 +1,10 @@
-name: Ingest breach sources (every 6 hours)
+name: Ingest breach sources (every 4 hours)
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    # Every 4 hours (00,04,08,12,16,20 UTC) — evenly divides the day. Steady-state
+    # runs are ~5 min against a 60-min timeout, so a run never overlaps the next.
+    - cron: '0 */4 * * *'
   workflow_dispatch: {}
 
 jobs:
