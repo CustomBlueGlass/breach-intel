@@ -15,7 +15,7 @@ const CAN_DO = [
 ];
 
 const HOW = [
-  'Sources: ransomware leak-site trackers, US state AG breach notices, HHS reports, SEC filings, and security press, re-ingested every 6 hours.',
+  'Sources: ransomware leak-site trackers, US state AG breach notices, HHS reports, SEC filings, and security press, re-ingested every 4 hours.',
   'Correlation dedupes and merges reports of the same incident across sources; the corroboration count shows how many independent sources back each entry.',
   'Only authoritative documents create a ledger entry. News and advisories attach as supporting evidence, never as standalone entries. This is a list of breached companies, not a news feed.',
   'A daily news-watch correlates recent security headlines to breaches by company name and keeps them for seven days as "related coverage".',
@@ -26,6 +26,12 @@ const LIMITS = [
   'Severity is estimated from record volume, data sensitivity, and attribution, not analyst-assigned.',
   'No personal data (emails, passwords, PII) is stored; only breach-level facts and links.',
   'Informational only, not legal advice or a definitive record.',
+];
+
+const COMPLIANCE = [
+  'Made in the UK.',
+  'Built to UK GDPR and ICO expectations: we record breach-level metadata only (company, dates, data categories, and record-count estimates) and never collect or store the leaked personal data itself.',
+  'Every entry links back to the public, authoritative source it came from, so anything here can be independently verified.',
 ];
 
 function List({ title, items, check }) {
@@ -62,6 +68,12 @@ export function AboutView() {
       <List title="What you can do" items={CAN_DO} check />
       <List title="How it works" items={HOW} />
       <List title="Sources & limitations" items={LIMITS} />
+      <List title="Compliance & provenance" items={COMPLIANCE} check />
+
+      <div className="mt-2 inline-flex items-center gap-2 rounded px-3 py-1.5"
+        style={{ border: `1px solid ${COLORS.line}`, color: COLORS.boneDim, fontFamily: FONT_MONO, fontSize: 12 }}>
+        Made in the UK · UK GDPR / ICO aligned · breach metadata only, never personal data
+      </div>
     </div>
   );
 }

@@ -23,6 +23,7 @@ from app.collectors.sources.cisa_kev import CISAKEVCollector
 from app.collectors.sources.hhs_ocr import HHSOCRCollector
 from app.collectors.sources.hibp import HIBPCollector
 from app.collectors.sources.oregon_doj import OregonDOJCollector
+from app.collectors.sources.ransomlook import RansomLookCollector
 from app.collectors.sources.ransomware_live import RansomwareLiveCollector
 from app.collectors.sources.sec_edgar import SECEdgarCollector
 from app.collectors.sources.washington_atg import WashingtonAGCollector
@@ -37,6 +38,7 @@ RSS_SLUGS = {
 
 EXPLICIT_COLLECTORS = {
     "ransomware_live": RansomwareLiveCollector,
+    "ransomlook": RansomLookCollector,
     "cisa_kev": CISAKEVCollector,
     "hhs_ocr_breach_portal": HHSOCRCollector,
     "haveibeenpwned": HIBPCollector,
@@ -57,7 +59,7 @@ PLACEHOLDER_HTML_SLUGS = {
     "ic3", "ico_enforcement", "edpb", "sec_cyber_disclosures",
 }
 
-ON_DEMAND_ONLY_SLUGS = {"dehashed", "intelx"}  # never scheduled — see sources/dehashed_intelx.py
+ON_DEMAND_ONLY_SLUGS = {"dehashed", "intelx", "breachdirectory"}  # never scheduled — see sources/dehashed_intelx.py
 
 # Sources that have a csv/json_api feed_type in the seed but don't yet have
 # a dedicated collector implemented. Logged as skipped rather than crashing.

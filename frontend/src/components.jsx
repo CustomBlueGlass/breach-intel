@@ -1357,6 +1357,10 @@ export function Footer({ onAbout }) {
           })}
         </div>
         <div className="flex items-center gap-4">
+          <span className="text-xs" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint }}
+            title="Made in the UK. Aligned with UK GDPR and ICO: we store breach metadata only, never personal data.">
+            Made in the UK · UK GDPR / ICO aligned
+          </span>
           {onAbout && (
             <button onClick={onAbout} className="text-xs hover:underline" style={{ fontFamily: FONT_MONO, color: COLORS.boneDim }}>
               About
