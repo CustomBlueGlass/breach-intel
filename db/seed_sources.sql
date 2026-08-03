@@ -11,6 +11,7 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 
 -- Ransomware leak-site trackers
 ('ransomware_live',   'Ransomware.live',         'https://www.ransomware.live',       'ransomware_leak_tracker', 'json_api', 'https://api.ransomware.live/v2/recentvictims', FALSE, 'scheduled', 'Public JSON API; no key required as of last check'),
+('ransomlook',        'RansomLook',               'https://www.ransomlook.io',         'ransomware_leak_tracker', 'json_api', 'https://www.ransomlook.io/api/recent', FALSE, 'scheduled', 'Keyless JSON API of recent leak-site victims; independent corroboration for ransomware.live'),
 ('ransom_db',         'Ransom-DB',                'https://ransom-db.com',              'ransomware_leak_tracker', 'html_scrape', NULL, FALSE, 'scheduled', 'No public feed discovered; structured table scrape'),
 ('leakix_ransomware',  'LeakIX — Ransomware',     'https://leakix.net/ransomware',      'ransomware_leak_tracker', 'json_api', 'https://leakix.net/api/ransomware', TRUE, 'scheduled', 'API key required for higher rate limits'),
 ('hackmanac',          'Hackmanac',                'https://hackmanac.com',              'ransomware_leak_tracker', 'rss', 'https://hackmanac.com/feed/', FALSE, 'scheduled', NULL),
@@ -47,6 +48,7 @@ INSERT INTO breach_data_sources (slug, name, base_url, category, feed_type, feed
 ('haveibeenpwned',    'Have I Been Pwned',          'https://haveibeenpwned.com',         'breach_lookup_service', 'json_api', 'https://haveibeenpwned.com/api/v3/breaches', FALSE, 'scheduled', 'The /breaches metadata endpoint requires NO API key (verified) — bulk breach metadata, no credential contents'),
 ('dehashed',          'DeHashed',                   'https://www.dehashed.com',           'breach_lookup_service', 'json_api', 'https://api.dehashed.com/search', TRUE, 'on_demand_lookup', 'Per-query lookup API. Store ONLY breach-name + date + record-count metadata returned for a queried company/domain. Never persist credential/password fields.'),
 ('intelx',            'Intelligence X',             'https://intelx.io',                  'breach_lookup_service', 'json_api', 'https://2.intelx.io/intelligent/search', TRUE, 'on_demand_lookup', 'Per-query lookup API. Same data-handling restriction as DeHashed above.'),
+('breachdirectory',   'BreachDirectory',            'https://breachdirectory.org',        'breach_lookup_service', 'json_api', 'https://breachdirectory.p.rapidapi.com/', TRUE, 'on_demand_lookup', 'Per-query lookup via RapidAPI. Store ONLY breach-name metadata; never credential fields (same policy as DeHashed/Intelx).'),
 
 -- Nonprofit / chronology trackers
 ('idtheftcenter',      'ID Theft Center — Data Breach', 'https://www.idtheftcenter.org/data-breach', 'nonprofit_tracker', 'html_scrape', NULL, FALSE, 'scheduled', NULL),

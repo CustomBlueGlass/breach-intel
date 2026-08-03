@@ -86,6 +86,29 @@ RE_ENABLE_SOURCES = {
     },
 }
 
+# Sources added after the initial seed_sources.sql. On an already-seeded
+# production database that INSERT never re-runs, so ensure they exist here
+# (idempotent via the unique slug). ransomlook runs on the schedule;
+# breachdirectory is an on-demand lookup (never scheduled — see registry
+# ON_DEMAND_ONLY_SLUGS) and stays dormant until a RapidAPI key is set.
+NEW_SOURCES = [
+    {
+        "slug": "ransomlook", "name": "RansomLook", "base_url": "https://www.ransomlook.io",
+        "category": "ransomware_leak_tracker", "feed_type": "json_api",
+        "feed_url": "https://www.ransomlook.io/api/recent", "requires_api_key": False,
+        "collection_mode": "scheduled",
+        "notes": "Keyless JSON API of recent leak-site victims; corroborates ransomware.live",
+    },
+    {
+        "slug": "breachdirectory", "name": "BreachDirectory", "base_url": "https://breachdirectory.org",
+        "category": "breach_lookup_service", "feed_type": "json_api",
+        "feed_url": "https://breachdirectory.p.rapidapi.com/", "requires_api_key": True,
+        "collection_mode": "on_demand_lookup",
+        "notes": "Per-query lookup via RapidAPI. Metadata-only; never store credential fields.",
+    },
+]
+
+
 PLATFORM_STATS_VIEW = """
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_platform_stats AS
 SELECT
@@ -187,6 +210,20 @@ END $$
 
 
 async def fix_sources(session) -> None:
+    # Register sources added after the original seed (idempotent on slug).
+    for s in NEW_SOURCES:
+        res = await session.execute(
+            text(
+                "INSERT INTO breach_data_sources "
+                "(slug, name, base_url, category, feed_type, feed_url, requires_api_key, collection_mode, notes) "
+                "VALUES (:slug, :name, :base_url, :category, :feed_type, :feed_url, :requires_api_key, :collection_mode, :notes) "
+                "ON CONFLICT (slug) DO NOTHING"
+            ),
+            s,
+        )
+        if res.rowcount:
+            logger.info("Registered new source '%s'", s["slug"])
+
     # Source names show on breach pages; normalize em/en dashes in them to a
     # plain hyphen so the UI stays dash-free (0x2014 = em dash, 0x2013 = en).
     em, en = chr(0x2014), chr(0x2013)

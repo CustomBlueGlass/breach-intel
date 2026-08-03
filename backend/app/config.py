@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     hibp_api_key: str | None = None
     dehashed_api_key: str | None = None
     intelx_api_key: str | None = None
+    breachdirectory_api_key: str | None = None  # RapidAPI key for BreachDirectory lookups
 
     # politeness / scraping etiquette for the html fallback collector
     scraper_user_agent: str = "BreachIntelBot/1.0 (+contact: ops@yourcompany.example)"

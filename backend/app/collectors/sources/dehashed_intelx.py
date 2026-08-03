@@ -73,6 +73,40 @@ async def enrich_company_intelx(domain: str, client: httpx.AsyncClient) -> list[
     return [_strip_to_metadata(e) for e in entries]
 
 
+async def enrich_company_breachdirectory(domain: str, client: httpx.AsyncClient) -> list[dict]:
+    """
+    BreachDirectory (via its RapidAPI endpoint) returns, for a queried
+    domain/email, which known breaches it appears in. Like DeHashed/Intelx it
+    can return per-record fields (email, hash, password, sha1) — the same
+    metadata-only policy applies: we keep breach name + count and discard every
+    credential field. No key -> no call.
+    """
+    if not settings.breachdirectory_api_key:
+        return []
+    resp = await client.get(
+        "https://breachdirectory.p.rapidapi.com/",
+        params={"func": "auto", "term": domain},
+        headers={
+            "X-RapidAPI-Key": settings.breachdirectory_api_key,
+            "X-RapidAPI-Host": "breachdirectory.p.rapidapi.com",
+        },
+        timeout=20.0,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    # BreachDirectory groups matches; collapse each result's `sources` list into
+    # per-breach metadata rows (breach name + a match count), never the record.
+    out: list[dict] = []
+    for entry in body.get("result", []):
+        for src in entry.get("sources", []) or []:
+            out.append({
+                "breach_name": src if isinstance(src, str) else (src.get("name") if isinstance(src, dict) else None),
+                "incident_date": None,  # BreachDirectory does not return a per-source breach date
+                "matching_record_count": None,
+            })
+    return out
+
+
 async def enrich_company(domain: str, company_name: str, client: httpx.AsyncClient) -> dict:
     """
     Call this on demand (e.g. from a button in the breach dossier UI:
@@ -83,10 +117,14 @@ async def enrich_company(domain: str, company_name: str, client: httpx.AsyncClie
     """
     dehashed = await enrich_company_dehashed(domain, client)
     intelx = await enrich_company_intelx(domain, client)
+    breachdirectory = await enrich_company_breachdirectory(domain, client)
     return {
         "company_name_norm": normalize_company_name(company_name),
         "domain": domain,
         "dehashed_results": dehashed,
         "intelx_results": intelx,
-        "incident_dates": [parse_any_date(r.get("incident_date")) for r in dehashed + intelx],
+        "breachdirectory_results": breachdirectory,
+        "incident_dates": [
+            parse_any_date(r.get("incident_date")) for r in dehashed + intelx + breachdirectory
+        ],
     }
