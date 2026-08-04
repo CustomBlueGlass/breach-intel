@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
@@ -374,6 +374,87 @@ export function DateReviewPill({ compact = false }) {
       <ShieldAlert size={compact ? 11 : 12} />
       {compact ? 'date?' : 'date unverified'}
     </span>
+  );
+}
+
+// On-demand credential-exposure lookup for a company domain. Calls the
+// server-side /api/exposure function (keys live there, never in the browser),
+// which returns breach NAMES and match COUNTS only, never credential data.
+// Dormant until a lookup key is set on the deployment; degrades gracefully.
+export function CredentialExposure({ breach }) {
+  const [domain, setDomain] = useState(breach.domain || '');
+  const [st, setSt] = useState({ status: 'idle' });
+
+  useEffect(() => { setDomain(breach.domain || ''); setSt({ status: 'idle' }); }, [breach.id]);
+
+  async function run() {
+    const d = domain.trim().toLowerCase();
+    if (!d) { setSt({ status: 'error', msg: 'Enter a domain first.' }); return; }
+    setSt({ status: 'loading' });
+    try {
+      const r = await fetch(`/api/exposure?domain=${encodeURIComponent(d)}`);
+      if (r.status === 404) { setSt({ status: 'error', msg: 'Exposure lookup is not available on this host.' }); return; }
+      const data = await r.json().catch(() => ({}));
+      if (data.configured === false) { setSt({ status: 'unconfigured' }); return; }
+      if (data.error) { setSt({ status: 'error', msg: data.error }); return; }
+      setSt({ status: 'done', data });
+    } catch {
+      setSt({ status: 'error', msg: 'Lookup failed. Try again.' });
+    }
+  }
+
+  return (
+    <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+      <div className="text-xs uppercase tracking-widest mb-1" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+        Credential exposure
+      </div>
+      <p className="text-xs mb-3" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
+        Check which known breaches this company's domain appears in. Returns breach names and counts only, never credential data.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={domain}
+          onChange={(e) => setDomain(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') run(); }}
+          placeholder="company-domain.com"
+          spellCheck={false} autoCapitalize="none"
+          className="px-2.5 py-1.5 rounded text-sm"
+          style={{ backgroundColor: COLORS.panel || 'transparent', border: `1px solid ${COLORS.line}`, color: COLORS.bone, fontFamily: FONT_MONO, minWidth: 220 }}
+        />
+        <button
+          onClick={run}
+          disabled={st.status === 'loading'}
+          className="px-3 py-1.5 rounded text-sm"
+          style={{ border: `1px solid ${COLORS.amber}`, color: COLORS.amber, fontFamily: FONT_MONO, opacity: st.status === 'loading' ? 0.6 : 1 }}
+        >
+          {st.status === 'loading' ? 'Checking...' : 'Check exposure'}
+        </button>
+      </div>
+
+      {st.status === 'unconfigured' && (
+        <div className="mt-3 text-xs rounded px-3 py-2" style={{ border: `1px solid rgba(217,142,51,0.35)`, backgroundColor: 'rgba(217,142,51,0.10)', color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+          Exposure lookups are not enabled. Add <span style={{ fontFamily: FONT_MONO, color: COLORS.amber }}>BREACHDIRECTORY_API_KEY</span> or <span style={{ fontFamily: FONT_MONO, color: COLORS.amber }}>DEHASHED_API_KEY</span> in the deployment environment to turn this on.
+        </div>
+      )}
+      {st.status === 'error' && (
+        <div className="mt-3 text-xs" style={{ color: COLORS.red || COLORS.amber, fontFamily: FONT_MONO }}>{st.msg}</div>
+      )}
+      {st.status === 'done' && (
+        <div className="mt-3 space-y-2">
+          {(st.data.results || []).map((r) => (
+            <div key={r.source} className="text-sm" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+              <span style={{ fontFamily: FONT_MONO, color: COLORS.bone }}>{r.source}</span>{' '}
+              {r.matches > 0
+                ? <>found <b style={{ color: COLORS.bone }}>{fmtNumber(r.matches)}</b> matching record{r.matches === 1 ? '' : 's'} across {r.breaches.length} breach{r.breaches.length === 1 ? '' : 'es'}: <span style={{ color: COLORS.boneDim }}>{r.breaches.join(', ')}</span></>
+                : <span style={{ color: COLORS.boneFaint }}>no known exposure.</span>}
+            </div>
+          ))}
+          {(st.data.errors || []).length > 0 && (
+            <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>Some sources errored: {st.data.errors.join('; ')}</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -977,6 +1058,8 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
             </div>
           ))}
         </div>
+
+        <CredentialExposure breach={breach} />
 
         {(() => {
           const events = buildTimeline(breach);
