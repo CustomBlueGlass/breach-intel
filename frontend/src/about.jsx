@@ -1,53 +1,21 @@
 import React from 'react';
-import { ShieldAlert, Check } from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
 import { COLORS, FONT_DISPLAY, FONT_BODY, FONT_MONO } from './constants';
 
-/* Concise About page: what the platform is and what it can do. */
+/* About page. Plain prose, written to be read, not skimmed off a slide. */
 
-const CAN_DO = [
-  'Browse, filter, and sort a ledger of breached companies by industry, threat actor, attribution, and date.',
-  'Open any company for a full dossier: incident and disclosure dates, threat actor, records affected, data types exposed, an incident timeline, leak-site evidence, all sources, and related news coverage.',
-  'Explore threat-actor profiles: attributed victims, activity timeline, targeting, aliases, and STIX 2.1 export.',
-  'Watch the live Threat Radar ticker: latest ransomware victims and newly exploited CVEs.',
-  'Use free, browser-only analyst tools: IOC extractor, enrichment launchpad, CIDR calculator, hash identifier, URL dissector, CVSS, JWT, base64, hashing, entropy, and more.',
-  'Keep a personal workspace: watchlist and recently-viewed, saved table views, adjustable columns and density.',
-  'Export any view as CSV, JSON, or STIX 2.1.',
-];
-
-const HOW = [
-  'Sources: ransomware leak-site trackers, US state AG breach notices, HHS reports, SEC filings, and security press, re-ingested every 4 hours.',
-  'Correlation dedupes and merges reports of the same incident across sources; the corroboration count shows how many independent sources back each entry.',
-  'Only authoritative documents create a ledger entry. News and advisories attach as supporting evidence, never as standalone entries. This is a list of breached companies, not a news feed.',
-  'A daily news-watch correlates recent security headlines to breaches by company name and keeps them for seven days as "related coverage".',
-];
-
-const LIMITS = [
-  'Built entirely on free, public sources. Coverage is best-effort and not exhaustive.',
-  'Severity is estimated from record volume, data sensitivity, and attribution, not analyst-assigned.',
-  'No personal data (emails, passwords, PII) is stored; only breach-level facts and links.',
-  'Informational only, not legal advice or a definitive record.',
-];
-
-const COMPLIANCE = [
-  'Made in the UK.',
-  'Built to UK GDPR and ICO expectations: we record breach-level metadata only (company, dates, data categories, and record-count estimates) and never collect or store the leaked personal data itself.',
-  'Every entry links back to the public, authoritative source it came from, so anything here can be independently verified.',
-];
-
-function List({ title, items, check }) {
+function Section({ label, children }) {
   return (
-    <div className="mb-7">
-      <div className="text-xs uppercase tracking-widest mb-3" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>{title}</div>
-      <ul className="space-y-2">
-        {items.map((t, i) => (
-          <li key={i} className="flex items-start gap-2 text-sm leading-relaxed" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
-            {check
-              ? <Check size={15} color={COLORS.teal} className="mt-0.5 shrink-0" />
-              : <span className="mt-2 shrink-0 rounded-full" style={{ width: 4, height: 4, backgroundColor: COLORS.boneFaint }} />}
-            <span>{t}</span>
-          </li>
-        ))}
-      </ul>
+    <div className="mb-8">
+      <div
+        className="text-xs uppercase tracking-widest mb-3"
+        style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}
+      >
+        {label}
+      </div>
+      <div className="space-y-3 text-sm leading-relaxed" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -59,19 +27,86 @@ export function AboutView() {
         <ShieldAlert size={18} color={COLORS.amber} />
         <h1 style={{ fontFamily: FONT_DISPLAY, color: COLORS.bone, fontSize: 26, fontWeight: 600 }}>About this platform</h1>
       </div>
+
       <p className="text-sm leading-relaxed mb-8" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>
-        A free breach-intelligence ledger for threat researchers. It tracks which companies have suffered a data
-        breach, when it happened, who was behind it, and where it was reported, correlating multiple public sources
-        into one record per incident.
+        This is a public record of company data breaches. One row for each real incident: who was hit, roughly
+        when, who was behind it where that is known, what kind of data went out, and where it was reported. It is
+        free to use, and every entry links back to the source it came from so you can check it for yourself.
       </p>
 
-      <List title="What you can do" items={CAN_DO} check />
-      <List title="How it works" items={HOW} />
-      <List title="Sources & limitations" items={LIMITS} />
-      <List title="Compliance & provenance" items={COMPLIANCE} check />
+      <Section label="Why it exists">
+        <p>
+          Breach news arrives in pieces. A ransomware crew posts a victim on their leak site. A US state attorney
+          general files a notice about it months later. A regulator logs it somewhere else again, and the trade
+          press writes it up in between. Stitching all of that together by hand is slow and easy to get wrong.
+        </p>
+        <p>
+          So the platform does the stitching. It reads those sources every few hours, works out when several of
+          them are describing the same event, and keeps one clean record with all of them attached.
+        </p>
+      </Section>
 
-      <div className="mt-2 inline-flex items-center gap-2 rounded px-3 py-1.5"
-        style={{ border: `1px solid ${COLORS.line}`, color: COLORS.boneDim, fontFamily: FONT_MONO, fontSize: 12 }}>
+      <Section label="What you can do">
+        <p>
+          Start on the ledger and filter it however you think: by industry, threat actor, date, or attribution.
+          Open any company to get the whole picture, including the incident and disclosure dates, the group
+          responsible, an estimate of how many records were affected, the categories of data exposed, a timeline,
+          leak-site evidence, and the full list of sources. Threat actors get their own profiles too, with the
+          victims attributed to them and a STIX 2.1 export if you want to take the data elsewhere. A live radar
+          along the top shows the newest ransomware victims and freshly exploited CVEs.
+        </p>
+        <p>
+          There is a set of analyst tools built in, so you are not opening five other tabs for the small jobs.
+          Most of them run entirely in your browser and send nothing anywhere: an IOC extractor and defanger, a
+          URL dissector, hashing and hash identification, CIDR maths, a CVSS calculator, JWT and base64 decoders,
+          and more. One tool, the live enrichment lookup, does call our own server. Give it an IP, a domain, a
+          file hash, or a CVE and it comes back with open ports and known vulnerabilities from Shodan's free
+          InternetDB, DNS records, a CIRCL hashlookup verdict, or an EPSS exploitation score. No API key needed.
+        </p>
+        <p>
+          Where a key is configured, you can also check a company's domain against credential-exposure sources.
+          Even then we only show which breaches it turned up in and how many records matched, never the
+          credentials themselves. Any view you build exports as CSV, JSON, or STIX 2.1.
+        </p>
+      </Section>
+
+      <Section label="Where the data comes from">
+        <p>
+          The sources are ransomware leak-site trackers such as ransomware.live and RansomLook, US state attorney
+          general breach notices, HHS reports, SEC filings, and the security press. They are re-read every four
+          hours. When more than one source describes the same breach, the reports are merged into a single record,
+          and a corroboration count tells you how many independent sources stand behind it.
+        </p>
+        <p>
+          Only an authoritative document creates an entry: a regulator notice, a filing, or a leak-site post. News
+          stories and advisories never stand on their own here. They attach to an existing breach as related
+          coverage and drop off after a week. This is a list of companies that were breached, not a news feed.
+        </p>
+      </Section>
+
+      <Section label="What it is not">
+        <p>
+          A few things worth being straight about. Everything here comes from free, public sources, so the
+          coverage is decent but not complete, and it leans toward incidents that someone chose to disclose.
+          Severity is our own estimate from record volume, how sensitive the data was, and who was involved, not a
+          figure handed down by anyone official. And none of this is legal advice or a definitive record. Treat it
+          as a well-sourced place to start, then verify what matters through the links.
+        </p>
+      </Section>
+
+      <Section label="Made in the UK">
+        <p>
+          Built in the UK, and built to stay on the right side of UK GDPR and the ICO. We hold breach-level facts
+          only: the company, the dates, the categories of data, and an estimate of how many records were involved.
+          We do not collect, store, or republish the leaked personal data itself. Because every entry points back
+          to the public source it came from, none of it has to be taken on trust.
+        </p>
+      </Section>
+
+      <div
+        className="mt-2 inline-flex items-center gap-2 rounded px-3 py-1.5"
+        style={{ border: `1px solid ${COLORS.line}`, color: COLORS.boneDim, fontFamily: FONT_MONO, fontSize: 12 }}
+      >
         Made in the UK · UK GDPR / ICO aligned · breach metadata only, never personal data
       </div>
     </div>
