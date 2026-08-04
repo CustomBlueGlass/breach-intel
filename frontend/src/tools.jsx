@@ -224,8 +224,9 @@ const PIVOTS = {
 
 /* ----------------------- live indicator enrichment ----------------------- */
 // Unlike the other tools, this one calls the platform's own serverless
-// enrichment API (/api/enrich): keyless Shodan InternetDB + DNS, so it works
-// with no key. It is the browser-facing side of the roadmap's Enrichment API.
+// enrichment API (/api/enrich): keyless Shodan InternetDB, DNS, CIRCL
+// hashlookup, and FIRST EPSS, so it works with no key. It is the
+// browser-facing side of the roadmap's Enrichment API.
 function EnrichTool() {
   const [q, setQ] = useState('');
   const [st, setSt] = useState({ status: 'idle' });
@@ -251,14 +252,14 @@ function EnrichTool() {
   return (
     <ToolCard
       title="Indicator enrichment (live)"
-      subtitle="Look up an IPv4 or domain via the platform's keyless enrichment API (Shodan InternetDB + DNS). This tool queries our server, not just your browser."
+      subtitle="Look up an IPv4, domain, file hash, or CVE through the platform's keyless enrichment API (Shodan InternetDB, DNS, CIRCL hashlookup, FIRST EPSS). This runs on our server, not just in your browser."
     >
       <div className="flex gap-2">
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') run(); }}
-          placeholder="8.8.8.8   or   example.com"
+          placeholder="8.8.8.8   ·   example.com   ·   <sha256>   ·   CVE-2024-3400"
           spellCheck={false} autoCapitalize="none"
           className="flex-1 rounded px-2 py-1.5 text-sm" style={inputStyle}
         />
@@ -282,6 +283,38 @@ function EnrichTool() {
               <Field label="A records" value={(d.dns.a || []).join(', ') || 'none'} />
               <Field label="AAAA records" value={(d.dns.aaaa || []).join(', ') || 'none'} />
             </>
+          )}
+          {d.type === 'hash' && (
+            d.hashlookup && d.hashlookup.found ? (
+              <>
+                <Field label="CIRCL hashlookup" value={`known ${(d.algo || '').toUpperCase()} file`} />
+                {d.hashlookup.fileName && <Field label="File name" value={d.hashlookup.fileName} />}
+                {d.hashlookup.source && <Field label="Source" value={d.hashlookup.source} />}
+                {d.hashlookup.trust != null && <Field label="Trust" value={`${d.hashlookup.trust}/100`} />}
+                {d.hashlookup.knownMalicious && <Field label="Flag" value="known malicious" />}
+              </>
+            ) : (
+              <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.boneFaint }}>
+                Not in CIRCL hashlookup. No known-good or known-bad record for this {(d.algo || 'hash').toUpperCase()}.
+              </div>
+            )
+          )}
+          {d.type === 'cve' && (
+            d.epss ? (
+              <>
+                <div className="flex items-start justify-between gap-2 py-1" style={{ borderTop: `1px solid ${COLORS.lineFaint}` }}>
+                  <span className="text-xs shrink-0" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>{d.indicator.toUpperCase()}</span>
+                  <a href={nvd(d.indicator.toUpperCase())} target="_blank" rel="noreferrer" className="text-xs" style={{ ...mono, color: COLORS.amber }}>NVD detail</a>
+                </div>
+                <Field label="EPSS" value={`${(d.epss.epss * 100).toFixed(1)}% chance of exploitation in 30 days`} />
+                <Field label="Percentile" value={`${(d.epss.percentile * 100).toFixed(1)}th of all CVEs`} />
+                <Field label="As of" value={d.epss.date} />
+              </>
+            ) : (
+              <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.boneFaint }}>
+                No EPSS score published for {d.indicator.toUpperCase()}.
+              </div>
+            )
           )}
           {d.abuseipdb && (
             <Field label="AbuseIPDB" value={`${d.abuseipdb.abuseConfidenceScore}/100 confidence · ${d.abuseipdb.totalReports} reports · ${d.abuseipdb.countryCode || '?'}`} />
