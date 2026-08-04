@@ -222,6 +222,99 @@ const PIVOTS = {
   ],
 };
 
+/* ----------------------- live indicator enrichment ----------------------- */
+// Unlike the other tools, this one calls the platform's own serverless
+// enrichment API (/api/enrich): keyless Shodan InternetDB + DNS, so it works
+// with no key. It is the browser-facing side of the roadmap's Enrichment API.
+function EnrichTool() {
+  const [q, setQ] = useState('');
+  const [st, setSt] = useState({ status: 'idle' });
+
+  async function run() {
+    const ind = q.trim();
+    if (!ind) return;
+    setSt({ status: 'loading' });
+    try {
+      const r = await fetch(`/api/enrich?indicator=${encodeURIComponent(ind)}`);
+      if (r.status === 404) { setSt({ status: 'error', msg: 'Enrichment API is not available on this host.' }); return; }
+      const data = await r.json().catch(() => ({}));
+      if (data.error) { setSt({ status: 'error', msg: data.error }); return; }
+      setSt({ status: 'done', data });
+    } catch {
+      setSt({ status: 'error', msg: 'Lookup failed. Try again.' });
+    }
+  }
+
+  const d = st.data;
+  const idb = d && d.internetdb;
+  const nvd = (cve) => `https://nvd.nist.gov/vuln/detail/${cve}`;
+  return (
+    <ToolCard
+      title="Indicator enrichment (live)"
+      subtitle="Look up an IPv4 or domain via the platform's keyless enrichment API (Shodan InternetDB + DNS). This tool queries our server, not just your browser."
+    >
+      <div className="flex gap-2">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') run(); }}
+          placeholder="8.8.8.8   or   example.com"
+          spellCheck={false} autoCapitalize="none"
+          className="flex-1 rounded px-2 py-1.5 text-sm" style={inputStyle}
+        />
+        <button
+          onClick={run} disabled={st.status === 'loading'}
+          className="rounded px-3 py-1.5 text-sm"
+          style={{ ...mono, border: `1px solid ${COLORS.amber}`, color: COLORS.amber, opacity: st.status === 'loading' ? 0.6 : 1 }}
+        >
+          {st.status === 'loading' ? '...' : 'Enrich'}
+        </button>
+      </div>
+
+      {st.status === 'error' && (
+        <div className="mt-3 text-xs" style={{ ...mono, color: COLORS.red || COLORS.amber }}>{st.msg}</div>
+      )}
+
+      {st.status === 'done' && (
+        <div className="mt-3">
+          {d.type === 'domain' && (
+            <>
+              <Field label="A records" value={(d.dns.a || []).join(', ') || 'none'} />
+              <Field label="AAAA records" value={(d.dns.aaaa || []).join(', ') || 'none'} />
+            </>
+          )}
+          {d.abuseipdb && (
+            <Field label="AbuseIPDB" value={`${d.abuseipdb.abuseConfidenceScore}/100 confidence · ${d.abuseipdb.totalReports} reports · ${d.abuseipdb.countryCode || '?'}`} />
+          )}
+          {idb && idb.found && (
+            <>
+              <Field label={d.type === 'domain' ? `Ports (${idb.ip})` : 'Open ports'} value={idb.ports.join(', ') || 'none'} />
+              {idb.hostnames.length > 0 && <Field label="Hostnames" value={idb.hostnames.join(', ')} />}
+              {idb.tags.length > 0 && <Field label="Tags" value={idb.tags.join(', ')} />}
+              {idb.vulns.length > 0 && (
+                <div className="flex items-start justify-between gap-2 py-1" style={{ borderTop: `1px solid ${COLORS.lineFaint}` }}>
+                  <span className="text-xs shrink-0" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>CVEs</span>
+                  <span className="text-xs text-right break-all" style={{ fontFamily: FONT_MONO }}>
+                    {idb.vulns.map((c, i) => (
+                      <span key={c}>{i > 0 ? ', ' : ''}<a href={nvd(c)} target="_blank" rel="noreferrer" style={{ color: COLORS.amber }}>{c}</a></span>
+                    ))}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+          {idb && !idb.found && (
+            <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.boneFaint }}>No Shodan InternetDB record for {idb.ip}.</div>
+          )}
+          {(d.errors || []).length > 0 && (
+            <div className="mt-2 text-xs" style={{ ...mono, color: COLORS.boneFaint }}>Some sources errored: {d.errors.join('; ')}</div>
+          )}
+        </div>
+      )}
+    </ToolCard>
+  );
+}
+
 function EnrichmentLaunchpad() {
   const [value, setValue] = useState('');
   const type = value.trim() ? detectIndicatorType(value) : null;
@@ -917,10 +1010,12 @@ export function ToolsView() {
         <h2 style={{ fontFamily: FONT_DISPLAY, color: COLORS.bone, fontSize: 22, fontWeight: 600 }}>Analyst tools</h2>
       </div>
       <p className="text-sm mb-5 max-w-2xl" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
-        Free, browser-only utilities so you don't have to leave the platform for the small pivots.
-        Everything here runs locally. No input is uploaded or logged.
+        Free analyst utilities so you don't have to leave the platform for the small pivots. Most run
+        entirely in your browser; the live indicator-enrichment tool queries the platform's own keyless
+        enrichment API. No input is logged.
       </p>
       <div className="grid gap-4 md:grid-cols-2">
+        <EnrichTool />
         <EnrichmentLaunchpad />
         <IocExtractor />
         <UrlTool />
