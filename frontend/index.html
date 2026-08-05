@@ -1,14 +1,143 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-GB">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ledger // Breach — Unified Breach Intelligence</title>
-    <!-- Tailwind is compiled into the bundle via PostCSS (see
-         tailwind.config.js / src/index.css) — no runtime CDN dependency. -->
+
+    <title>Breach Database | Latest Data Breaches, Ransomware and UK Incidents</title>
+    <meta
+      name="description"
+      content="A free, public breach database tracking the latest data breaches worldwide. Search breached companies, ransomware groups and UK incidents, with a cited source behind every entry."
+    />
+    <meta
+      name="keywords"
+      content="breach database, data breach, latest breaches, UK data breaches, ransomware victims, breach intelligence, data breach list, breach tracker, breached companies"
+    />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="theme-color" content="#0E1116" />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- Canonical / social URLs are set at runtime from the serving host (see
+         the script below) so they stay correct on the current URL and on any
+         future custom domain, with no hardcoded address to go stale. -->
+    <link rel="canonical" href="/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Breach Intelligence Platform" />
+    <meta property="og:locale" content="en_GB" />
+    <meta property="og:title" content="Breach Database | Latest Data Breaches, Ransomware and UK Incidents" />
+    <meta
+      property="og:description"
+      content="A free, public breach database tracking the latest data breaches worldwide. One record per incident, with a cited source behind every entry."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Breach Database | Latest Data Breaches, Ransomware and UK Incidents" />
+    <meta
+      name="twitter:description"
+      content="A free, public breach database tracking the latest data breaches worldwide, refreshed every four hours."
+    />
+
+    <!-- Structured data. Organization + Dataset are host-independent; the
+         WebSite entity (with a search action) is added at runtime so its URLs
+         match the serving host. Google Dataset Search reads the Dataset. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Breach Intelligence Platform",
+        "description": "A free, public breach intelligence platform and data breach database, made in the UK.",
+        "foundingLocation": { "@type": "Place", "name": "United Kingdom" },
+        "areaServed": "Worldwide",
+        "knowsAbout": ["data breaches", "ransomware", "threat intelligence", "credential exposure"]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Dataset",
+        "name": "Breach Intelligence Ledger",
+        "description": "A continuously updated database of company data breaches worldwide, one record per incident, correlated from ransomware leak sites, US state attorney general notices, HHS breach reports, SEC filings and the security press. Covers UK and global breaches, with a cited source for every entry.",
+        "keywords": ["data breach", "breach database", "latest breaches", "UK data breaches", "ransomware victims", "breach intelligence", "data breach list"],
+        "creator": { "@type": "Organization", "name": "Breach Intelligence Platform" },
+        "isAccessibleForFree": true,
+        "countryOfOrigin": "United Kingdom",
+        "measurementTechnique": "Automated multi-source correlation, refreshed every four hours"
+      }
+    </script>
+
+    <script>
+      // Point canonical + social URLs at whatever host is serving the page,
+      // and register the site search action for the current origin.
+      (function () {
+        try {
+          var origin = window.location.origin;
+          var page = origin + window.location.pathname;
+          var canon = document.querySelector('link[rel="canonical"]');
+          if (canon) canon.setAttribute('href', page);
+          function meta(attr, key, val) {
+            var el = document.querySelector('meta[' + attr + '="' + key + '"]');
+            if (!el) { el = document.createElement('meta'); el.setAttribute(attr, key); document.head.appendChild(el); }
+            el.setAttribute('content', val);
+          }
+          meta('property', 'og:url', page);
+          meta('name', 'twitter:url', page);
+          var ld = document.createElement('script');
+          ld.type = 'application/ld+json';
+          ld.textContent = JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'WebSite',
+            name: 'Breach Intelligence Platform',
+            url: origin + '/',
+            potentialAction: {
+              '@type': 'SearchAction',
+              target: origin + '/?q={search_term_string}',
+              'query-input': 'required name=search_term_string'
+            }
+          });
+          document.head.appendChild(ld);
+        } catch (e) { /* non-fatal */ }
+      })();
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- The app replaces #root on mount. Until then (and for crawlers or AI
+         fetchers that do not run JavaScript) this static summary describes the
+         site in plain, indexable HTML. -->
+    <div id="root">
+      <main style="max-width: 760px; margin: 0 auto; padding: 40px 24px; font-family: -apple-system, 'Segoe UI', sans-serif; color: #ECE7DE; background: #0E1116;">
+        <h1>Breach Database: the latest data breaches, tracked and sourced</h1>
+        <p>
+          This is a free, public breach intelligence platform. It is a data breach database that records
+          which companies have suffered a breach, when it happened, who was behind it and where it was
+          reported, with one clean record for each incident and a link back to the original source.
+        </p>
+        <h2>What the breach database covers</h2>
+        <ul>
+          <li>The latest data breaches worldwide, including UK and global incidents.</li>
+          <li>Ransomware victims named on leak sites, correlated across trackers.</li>
+          <li>US state attorney general breach notices, HHS breach reports and SEC filings.</li>
+          <li>Security press coverage attached to each breach as supporting evidence.</li>
+        </ul>
+        <h2>How it works</h2>
+        <p>
+          Sources are re-read every four hours. When several sources describe the same breach they are
+          merged into a single record. A corroboration count then shows how many independent sources back
+          it. Only authoritative documents create an entry, so this is a list of breached companies rather
+          than a news feed. Built in the UK, aligned with UK GDPR and the ICO, holding breach metadata only
+          and never the leaked personal data itself.
+        </p>
+        <h2>Explore</h2>
+        <ul>
+          <li>Search and filter breached companies by industry, ransomware group, date or attribution.</li>
+          <li>Open any company for its full dossier, timeline, evidence and sources.</li>
+          <li>Track threat actors and their attributed victims, with STIX 2.1 export.</li>
+          <li>Enrich an IP, domain, file hash or CVE, then check a company domain for credential exposure.</li>
+        </ul>
+        <noscript>
+          <p>This site works without JavaScript for reading this summary. Enable JavaScript to search the full, interactive breach database.</p>
+        </noscript>
+      </main>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

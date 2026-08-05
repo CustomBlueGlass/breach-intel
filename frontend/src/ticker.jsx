@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Radar, ExternalLink, X } from 'lucide-react';
-import { COLORS, FONT_MONO, FONT_BODY, relativeTime } from './constants';
+import { COLORS, FONT_MONO, FONT_BODY, relativeTime, safeUrl } from './constants';
 
 /* ============================================================================
    Threat Radar — a live ticker of fresh threat signals (latest ransomware
@@ -38,8 +38,8 @@ function Item({ it }) {
   );
   const cls = 'inline-flex items-center gap-2 px-4 whitespace-nowrap';
   const style = { borderRight: `1px solid ${COLORS.lineFaint}` };
-  return it.url ? (
-    <a href={it.url} target="_blank" rel="noopener noreferrer" className={`${cls} hover:opacity-100`} style={{ ...style, opacity: 0.92 }}>
+  return safeUrl(it.url) ? (
+    <a href={safeUrl(it.url)} target="_blank" rel="noopener noreferrer" className={`${cls} hover:opacity-100`} style={{ ...style, opacity: 0.92 }}>
       {inner}
       <ExternalLink size={10} color={COLORS.boneFaint} />
     </a>
