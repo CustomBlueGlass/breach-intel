@@ -125,3 +125,14 @@ export function relativeTime(d) {
   if (days < 30) return `${Math.round(days / 7)}w ago`;
   return `${Math.round(days / 30)}mo ago`;
 }
+
+// URLs in the ledger come from ingested source data (leak-site posts, AG
+// notices, news feeds), not from us. Before using one as a link or image
+// source, confirm it is http(s) so a hostile or malformed upstream value
+// can't slip a `javascript:` (or other scheme) URL into an href/src. Returns
+// the URL when safe, otherwise null so the caller can skip rendering it.
+export function safeUrl(u) {
+  if (typeof u !== 'string') return null;
+  const s = u.trim();
+  return /^https?:\/\//i.test(s) ? s : null;
+}

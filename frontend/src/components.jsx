@@ -12,7 +12,7 @@ import {
 import {
   COLORS, FONT_DISPLAY, FONT_BODY, FONT_MONO,
   INDUSTRY_LABELS, SOURCE_CATEGORY_META, SEVERITY_META, ATTACK_NAMES,
-  fmtNumber, fmtDate, fmtDateTime, relativeTime,
+  fmtNumber, fmtDate, fmtDateTime, relativeTime, safeUrl,
 } from './constants';
 
 /* ------------------------- small shared atoms ------------------------- */
@@ -75,10 +75,10 @@ export function SourceCategoryChip({ category, sourceName, docType, dateStr, con
             {String(summary).slice(0, 220)}{String(summary).length > 220 ? '…' : ''}
           </p>
         )}
-        {url && (
+        {safeUrl(url) && (
           <div className="mt-1 flex flex-col gap-0.5">
             <a
-              href={url}
+              href={safeUrl(url)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs break-all hover:underline"
@@ -91,7 +91,7 @@ export function SourceCategoryChip({ category, sourceName, docType, dateStr, con
             {/* Link permanence: leak sites and AG pages rot. A one-click
                 Archive.org snapshot lets an analyst cite a durable copy. */}
             <a
-              href={`https://web.archive.org/web/2/${url}`}
+              href={`https://web.archive.org/web/2/${encodeURIComponent(safeUrl(url))}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs hover:underline"
@@ -1155,11 +1155,12 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
             <div className="flex flex-wrap gap-3">
               {breach.evidence.map((ev, i) => (
                 ev.kind === 'screenshot' ? (
-                  <a key={i} href={ev.post || ev.url} target="_blank" rel="noopener noreferrer"
+                  safeUrl(ev.url) ? (
+                  <a key={i} href={safeUrl(ev.post) || safeUrl(ev.url)} target="_blank" rel="noopener noreferrer"
                      className="block rounded-md overflow-hidden" style={{ border: `1px solid ${COLORS.line}`, width: 168 }}
                      title="Open the leak-site post (opens the source in a new tab)">
                     <img
-                      src={ev.url} alt="Leak-site post screenshot" loading="lazy" referrerPolicy="no-referrer"
+                      src={safeUrl(ev.url)} alt="Leak-site post screenshot" loading="lazy" referrerPolicy="no-referrer"
                       className="block w-full" style={{ height: 104, objectFit: 'cover', objectPosition: 'top', backgroundColor: COLORS.ink }}
                       onError={(e) => { e.currentTarget.parentElement.style.display = 'none'; }}
                     />
@@ -1167,13 +1168,16 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
                       <Archive size={10} /> screenshot{ev.source ? ` · ${ev.source}` : ''}
                     </div>
                   </a>
+                  ) : null
                 ) : (
-                  <a key={i} href={ev.url} target="_blank" rel="noopener noreferrer"
+                  safeUrl(ev.url) ? (
+                  <a key={i} href={safeUrl(ev.url)} target="_blank" rel="noopener noreferrer"
                      className="inline-flex items-center gap-1.5 text-sm hover:underline self-start"
                      style={{ color: COLORS.teal, fontFamily: FONT_BODY }}>
                     <ShieldCheck size={13} /> Official disclosure
                     {ev.source ? <span style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>· via {ev.source}</span> : null}
                   </a>
+                  ) : null
                 )
               ))}
             </div>
@@ -1193,7 +1197,7 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
             </div>
             <div className="flex flex-col gap-2">
               {breach.related_news.map((n, i) => (
-                <a key={i} href={n.url} target="_blank" rel="noopener noreferrer"
+                <a key={i} href={safeUrl(n.url) || '#'} target="_blank" rel="noopener noreferrer"
                    className="group flex items-start gap-2.5 rounded-md px-2.5 py-2 hover:underline"
                    style={{ border: `1px solid ${COLORS.line}` }}
                    title="Opens the outlet's article in a new tab">

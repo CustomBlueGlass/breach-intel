@@ -33,9 +33,17 @@ export async function fetchRansomwareGroupOptions() {
  * .range() maps to SQL LIMIT/OFFSET; { count: 'exact' } gets the total
  * without a second round-trip.
  */
+// PostgREST parses the .or() string itself, so commas, parentheses and stars
+// in a raw search term would break out of the ilike into other filter syntax.
+// Strip those metacharacters (same guard as searchLedger) before interpolating.
+function sanitizeTerm(q) {
+  return String(q).trim().replace(/[,()*]/g, ' ');
+}
+
 function applyLedgerFilters(query, filters) {
   if (filters.q) {
-    query = query.or(`canonical_name.ilike.%${filters.q}%,ransomware_group.ilike.%${filters.q}%`);
+    const term = sanitizeTerm(filters.q);
+    query = query.or(`canonical_name.ilike.%${term}%,ransomware_group.ilike.%${term}%`);
   }
   if (filters.industry) query = query.eq('industry', filters.industry);
   // ilike without wildcards = case-insensitive exact match, so a dropdown

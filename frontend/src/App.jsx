@@ -42,7 +42,12 @@ function toCsv(rows) {
   const cols = Object.keys(rows[0]);
   const esc = (v) => {
     if (v == null) return '';
-    const s = Array.isArray(v) ? v.join(';') : String(v);
+    let s = Array.isArray(v) ? v.join(';') : String(v);
+    // CSV formula-injection guard: a cell that a spreadsheet would treat as a
+    // formula (starts with = + - @, or a tab/CR) gets a leading apostrophe so
+    // Excel/Sheets renders it as text instead of executing it. Breach data is
+    // ingested from third parties, so a company/actor name is untrusted here.
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n');
@@ -253,8 +258,11 @@ export default function App() {
   }
 
   // Permalink support: #breach=<id> opens a case; #actor=<name> opens an actor
-  // profile — so researchers can share a link straight to either.
+  // profile — so researchers can share a link straight to either. ?q=<term>
+  // pre-fills the ledger search, which also backs the site's search action.
   useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('q');
+    if (q) setFilters((f) => ({ ...f, q }));
     const hb = window.location.hash.match(/^#breach=([0-9a-f-]{36})$/i);
     if (hb) { openBreach({ id: hb[1] }); return; }
     const ha = window.location.hash.match(/^#actor=(.+)$/);
