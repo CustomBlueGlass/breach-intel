@@ -79,6 +79,15 @@ function Capability({ title, summary }) {
   );
 }
 
+const INTEGRATIONS = [
+  'CrowdStrike',
+  'Microsoft Entra ID (Azure AD)',
+  'Okta',
+  'Microsoft Intune',
+  'Jamf',
+  'Google Workspace',
+];
+
 export function AboutView() {
   return (
     <div className="px-6 py-10 max-w-3xl">
@@ -146,6 +155,34 @@ export function AboutView() {
           public source it came from, none of it has to be taken on trust.
         </p>
       </Prose>
+
+      <Prose label="Security and compliance">
+        <p>
+          Beyond UK GDPR and the ICO, we are building toward the standards enterprise buyers expect. SOC 2 Type
+          II and ISO 27001 certification are on the roadmap, with controls designed to support HIPAA requirements
+          for the teams that need them. To be clear, these audits and certifications are planned, not yet in
+          place.
+        </p>
+      </Prose>
+
+      <div className="mb-8">
+        <SectionLabel>Planned integrations</SectionLabel>
+        <p className="text-sm leading-relaxed mb-3" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+          We are building connectors so breach and exposure signals land in the tools your security team already
+          runs. On the roadmap:
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {INTEGRATIONS.map((name) => (
+            <span
+              key={name}
+              className="text-xs rounded px-2.5 py-1"
+              style={{ fontFamily: FONT_MONO, color: COLORS.boneDim, backgroundColor: COLORS.panelAlt, border: `1px solid ${COLORS.line}` }}
+            >
+              {name}
+            </span>
+          ))}
+        </div>
+      </div>
 
       <div
         className="mt-2 inline-flex items-center gap-2 rounded px-3 py-1.5"
