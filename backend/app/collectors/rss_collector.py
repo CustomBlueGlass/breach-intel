@@ -18,6 +18,7 @@ import feedparser
 from app.collectors.base import BaseCollector, NormalizedRecord
 from app.normalize.company_name import normalize_company_name
 from app.normalize.date_parser import parse_any_date
+from app.normalize.headline_org import guess_company_from_title
 from app.normalize.ransomware_group_aliases import extract_ransomware_group
 
 # Browser-like headers to avoid 403s from sites that block bot User-Agents.
@@ -92,7 +93,8 @@ class RSSCollector(BaseCollector):
 
     @staticmethod
     def _guess_company_from_title(title: str) -> str:
-        for sep in (" discloses", " confirms", " hit by", " suffers", " reports", ":"):
-            if sep in title:
-                return title.split(sep)[0].strip()
-        return title.split(",")[0].strip()
+        # Delegates to the rule-based headline extractor (app.normalize.
+        # headline_org), which handles the common breach-headline shapes
+        # (leading-org, "breach at X", "attack on X", "data from X",
+        # "N records exposed in X breach") rather than just a few verbs.
+        return guess_company_from_title(title)
