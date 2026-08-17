@@ -1,0 +1,35 @@
+name: Backfill news-watch org names
+
+# One-off, manual-only: recompute org_guess/org_norm on existing UNMATCHED
+# news_watch rows with the current headline extractor, then re-correlate.
+# Metadata only; idempotent. See backend/app/backfill_news_org.py.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Read/writes the DB via DATABASE_URL, not the repo; don't leave
+          # GITHUB_TOKEN persisted in .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Recompute org names + re-correlate
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m app.backfill_news_org
