@@ -73,6 +73,17 @@ NEWS_FEEDS = [
     ("darkreading", "Dark Reading", "https://www.darkreading.com/rss.xml"),
     ("cybernews", "Cybernews", "https://cybernews.com/feed/"),
     ("securityweek", "SecurityWeek", "https://www.securityweek.com/feed/"),
+    # Google News keyword feeds: recent headlines containing the exact phrase
+    # "data breach", UK edition and global (US/en) edition. These widen coverage
+    # far beyond the five outlets above, across every publisher Google indexes,
+    # from a structured feed that permits programmatic use (unlike scraping an
+    # aggregator such as NewsNow). Google News titles arrive as
+    # "Headline - Publisher" and the two editions overlap on big breaches; both
+    # are handled in pull() (title cleanup + in-run de-duplication).
+    ("googlenews_uk", "Google News (data breach, UK)",
+     "https://news.google.com/rss/search?q=%22data+breach%22&hl=en-GB&gl=GB&ceid=GB:en"),
+    ("googlenews_global", "Google News (data breach, global)",
+     "https://news.google.com/rss/search?q=%22data+breach%22&hl=en-US&gl=US&ceid=US:en"),
 ]
 
 RETENTION_DAYS = 7
@@ -98,6 +109,16 @@ _WORD_RE = re.compile(r"[a-z0-9][a-z0-9\-]+")
 def _title_hash(title: str) -> str:
     norm = re.sub(r"\s+", " ", (title or "").strip().lower())
     return hashlib.sha256(norm.encode()).hexdigest()
+
+
+def _clean_feed_title(slug: str, title: str) -> str:
+    """Google News RSS titles come through as "Headline - Publisher". Strip the
+    trailing " - Publisher" so the stored headline and the org guess do not
+    inherit the outlet name. Only applied to the Google News feeds, where the
+    format is reliable; every other feed keeps its title verbatim."""
+    if slug.startswith("googlenews") and " - " in title:
+        return title.rsplit(" - ", 1)[0].strip() or title
+    return title
 
 
 def _keywords(title: str) -> list[str]:
@@ -198,6 +219,11 @@ async def pull(session) -> int:
     """Fetch title+URL+date from each feed and upsert new rows. Returns the
     number of newly inserted headlines."""
     inserted = 0
+    # A story can arrive from more than one feed in the same run (the UK and
+    # global Google News editions overlap heavily on big breaches). Dedupe by
+    # normalized-title hash within the run so it lands once, rather than as two
+    # near-identical related-coverage links with different redirect URLs.
+    seen_hashes: set[str] = set()
     async with httpx.AsyncClient(timeout=30.0, headers=RSS_HEADERS, follow_redirects=True) as client:
         for slug, name, url in NEWS_FEEDS:
             try:
@@ -210,10 +236,15 @@ async def pull(session) -> int:
 
             parsed = feedparser.parse(raw)
             for entry in parsed.entries:
-                title = (getattr(entry, "title", "") or "").strip()
+                title = _clean_feed_title(slug, (getattr(entry, "title", "") or "").strip())
                 link = getattr(entry, "link", None)
                 if not title or not link:
                     continue
+
+                thash = _title_hash(title)
+                if thash in seen_hashes:
+                    continue
+                seen_hashes.add(thash)
 
                 published = None
                 if getattr(entry, "published_parsed", None):
@@ -238,7 +269,7 @@ async def pull(session) -> int:
                         "title": title[:500],
                         "url": link,
                         "published": published,
-                        "hash": _title_hash(title),
+                        "hash": thash,
                         "org": org,
                         "org_norm": normalize_company_name(org) if org else None,
                         "kw": _keywords(title),
