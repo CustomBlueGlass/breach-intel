@@ -110,13 +110,14 @@ export function SourceCategoryChip({ category, sourceName, docType, dateStr, con
 
 /* ------------------------------- top bar -------------------------------- */
 
-export function TopBar({ tab, setTab, pendingCount, watchCount }) {
+export function TopBar({ tab, setTab, pendingCount, watchCount, signedIn, authControl }) {
   const tabs = [
     { id: 'ledger', label: 'Ledger' },
     { id: 'analytics', label: 'Analytics' },
     { id: 'workspace', label: 'Workspace', badge: watchCount },
     { id: 'tools', label: 'Tools' },
     { id: 'pricing', label: 'Pricing' },
+    ...(signedIn ? [{ id: 'dashboard', label: 'Dashboard' }] : []),
     { id: 'queue', label: 'Match queue', badge: pendingCount },
   ];
   return (
@@ -163,6 +164,7 @@ export function TopBar({ tab, setTab, pendingCount, watchCount }) {
           </button>
         ))}
       </nav>
+      {authControl && <div className="shrink-0 ml-1">{authControl}</div>}
     </header>
   );
 }

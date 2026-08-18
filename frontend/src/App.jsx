@@ -11,6 +11,8 @@ import { ThreatActorDrawer, actorStixBundle } from './actor';
 import { WorkspaceView } from './workspace';
 import { AboutView } from './about';
 import { PricingView } from './pricing';
+import { useAuth } from './lib/auth';
+import { AuthModal, AuthButton, DashboardView } from './account';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
   fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
@@ -56,6 +58,9 @@ function toCsv(rows) {
 
 export default function App() {
   useGoogleFonts();
+
+  const { session } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
 
   const [tab, setTab] = useState('ledger');
   const [filters, setFilters] = useState({ q: '', industry: '', group: '', attribution: '', dateFrom: '', dateTo: '' });
@@ -294,6 +299,9 @@ export default function App() {
     }
   }
 
+  // If the session ends while on the Dashboard, fall back to the ledger.
+  useEffect(() => { if (!session && tab === 'dashboard') setTab('ledger'); }, [session, tab]);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -308,7 +316,14 @@ export default function App() {
         .no-scrollbar::-webkit-scrollbar { display: none; }
       `}</style>
 
-      <TopBar tab={tab} setTab={setTab} pendingCount={queueItems.length} watchCount={watchCount} />
+      <TopBar
+        tab={tab}
+        setTab={setTab}
+        pendingCount={queueItems.length}
+        watchCount={watchCount}
+        signedIn={!!session}
+        authControl={<AuthButton onOpenAuth={() => setAuthOpen(true)} onDashboard={() => setTab('dashboard')} />}
+      />
       <ThreatRadar items={radar} />
 
       {tab === 'ledger' && (
@@ -396,11 +411,14 @@ export default function App() {
 
       {tab === 'pricing' && <PricingView onStart={() => setTab('ledger')} />}
 
+      {tab === 'dashboard' && session && <DashboardView onBrowsePlans={() => setTab('pricing')} />}
+
       {tab === 'about' && <AboutView />}
 
       {tab === 'queue' && <MatchQueueView items={queueItems} />}
 
       <Footer onAbout={() => setTab('about')} />
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
       <CommandPalette
         open={paletteOpen}
         setOpen={setPaletteOpen}
