@@ -10,6 +10,7 @@ import { ThreatRadar } from './ticker';
 import { ThreatActorDrawer, actorStixBundle } from './actor';
 import { WorkspaceView } from './workspace';
 import { AboutView } from './about';
+import { PricingView } from './pricing';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
   fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
@@ -392,6 +393,8 @@ export default function App() {
       )}
 
       {tab === 'tools' && <ToolsView />}
+
+      {tab === 'pricing' && <PricingView onStart={() => setTab('ledger')} />}
 
       {tab === 'about' && <AboutView />}
 

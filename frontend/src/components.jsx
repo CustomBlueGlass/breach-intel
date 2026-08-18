@@ -116,6 +116,7 @@ export function TopBar({ tab, setTab, pendingCount, watchCount }) {
     { id: 'analytics', label: 'Analytics' },
     { id: 'workspace', label: 'Workspace', badge: watchCount },
     { id: 'tools', label: 'Tools' },
+    { id: 'pricing', label: 'Pricing' },
     { id: 'queue', label: 'Match queue', badge: pendingCount },
   ];
   return (
