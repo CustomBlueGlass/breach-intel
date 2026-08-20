@@ -3,7 +3,7 @@ import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
   FileText, ExternalLink, Download, Copy, Link2, Check, Archive, ShieldCheck,
-  Newspaper, SlidersHorizontal, Save, Trash2, Star, Sparkles, Scale,
+  Newspaper, SlidersHorizontal, Save, Trash2, Star, Sparkles, Scale, Fingerprint,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -975,6 +975,75 @@ function describeEnrichment(changed) {
   return out;
 }
 
+// Field-level provenance and conflict surfacing. `breach.provenance` (built in
+// lib/api) lists, per field, which sources asserted a value and whether they
+// disagree. This exposes the underlying agreement without changing the ledger's
+// reconciled figure. Formatting is per field so a count reads as a number and a
+// date as a date.
+const PROV_FMT = {
+  records_affected_est: (v) => fmtNumber(v),
+  incident_date: (v) => fmtDate(String(v).slice(0, 10)),
+};
+function fmtProv(id, v) {
+  if (v == null || v === '') return '-';
+  if (PROV_FMT[id]) return PROV_FMT[id](v);
+  return Array.isArray(v) ? v.join(', ') : String(v);
+}
+function ProvenanceSection({ provenance }) {
+  const fields = provenance || [];
+  if (fields.length === 0) return null;
+  return (
+    <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center gap-2 mb-1">
+        <Fingerprint size={14} color={COLORS.teal} />
+        <span className="text-xs uppercase tracking-widest" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+          Source agreement
+        </span>
+      </div>
+      <div className="text-xs mb-3" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
+        Which independent sources set each field, and where they disagree. The value shown is the
+        platform's reconciled figure: earliest date, largest verified count, combined data types.
+      </div>
+      <div className="space-y-2">
+        {fields.map((f) => (
+          <div
+            key={f.id}
+            className="rounded-md px-3 py-2"
+            style={{
+              border: `1px solid ${f.conflict ? 'rgba(217,142,51,0.35)' : COLORS.line}`,
+              backgroundColor: f.conflict ? 'rgba(217,142,51,0.06)' : 'transparent',
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>{f.label}</span>
+              {f.conflict ? (
+                <span className="inline-flex items-center gap-1 text-xs" style={{ color: COLORS.amber, fontFamily: FONT_MONO }}>
+                  <ShieldAlert size={11} /> sources disagree
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs" style={{ color: COLORS.teal, fontFamily: FONT_MONO }}>
+                  <ShieldCheck size={11} /> {f.sources.length === 1 ? '1 source' : `${f.sources.length} sources agree`}
+                </span>
+              )}
+            </div>
+            <div className="text-sm mt-0.5" style={{ color: COLORS.bone, fontFamily: FONT_MONO }}>{fmtProv(f.id, f.current)}</div>
+            {f.conflict && (
+              <ul className="mt-1.5 space-y-0.5">
+                {f.sources.map((s, i) => (
+                  <li key={i} className="text-xs flex items-baseline gap-1.5" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+                    <span className="shrink-0" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>{s.name}</span>
+                    <span>{fmtProv(f.id, s.value)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Post-incident developments: how the aftermath (fines, lawsuits, settlements)
 // is labelled and coloured in the dossier.
 const CURRENCY_SYMBOL = { GBP: '£', USD: '$', EUR: '€' };
@@ -1037,6 +1106,9 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
       </div>
     );
   }
+  // Fields whose sources disagree, keyed by field id, so the metadata grid can
+  // flag the value inline and draw the eye to the Source-agreement panel below.
+  const conflictFields = new Set((breach.provenance || []).filter((p) => p.conflict).map((p) => p.id));
   return (
     <div className="fixed inset-0 z-30 flex justify-end" role="dialog" aria-modal="true">
       <div
@@ -1131,24 +1203,36 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
 
         <div className="grid grid-cols-2 gap-4 px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
           {[
-            ['Incident date', breach.incident_date ? fmtDate(breach.incident_date) : (needsDateReview(breach) ? 'Unknown' : '-')],
+            ['Incident date', breach.incident_date ? fmtDate(breach.incident_date) : (needsDateReview(breach) ? 'Unknown' : '-'), null, 'incident_date'],
             ['Publicly disclosed', breach.disclosed_date ? fmtDate(breach.disclosed_date) : (needsDateReview(breach) ? 'Unknown' : '-')],
             ['Time to disclosure', disclosureLag(breach.incident_date, breach.disclosed_date)],
-            ['Threat actor', breach.ransomware_group || 'Unattributed'],
-            ['Records affected (est.)', fmtNumber(breach.records_affected_est)],
-            ['Location', [breach.region_state, breach.country].filter(Boolean).join(', ') || '-'],
+            ['Threat actor', breach.ransomware_group || 'Unattributed', null, 'ransomware_group'],
+            ['Records affected (est.)', fmtNumber(breach.records_affected_est), null, 'records_affected_est'],
+            ['Location', [breach.region_state, breach.country].filter(Boolean).join(', ') || '-', null, 'location'],
             ['Status', (breach.status || 'confirmed').replace(/^./, (c) => c.toUpperCase())],
             ['Correlated sources', breach.source_count],
             ['Source-match confidence',
               breach.confidence_avg != null ? `${Math.round(breach.confidence_avg * 100)}%` : '-',
               'How confidently the correlated sources above were matched as the same breach (average across those sources).'],
-          ].map(([label, val, tip]) => (
-            <div key={label}>
-              <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }} title={tip || undefined}>{label}</div>
-              <div className="text-sm mt-0.5" style={{ color: COLORS.bone, fontFamily: FONT_MONO }}>{val}</div>
-            </div>
-          ))}
+          ].map(([label, val, tip, fid]) => {
+            const conflict = fid && conflictFields.has(fid);
+            return (
+              <div key={label}>
+                <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }} title={tip || undefined}>{label}</div>
+                <div className="text-sm mt-0.5 flex items-center gap-1.5" style={{ color: COLORS.bone, fontFamily: FONT_MONO }}>
+                  {val}
+                  {conflict && (
+                    <span title="Sources disagree on this field. See Source agreement below." style={{ display: 'inline-flex' }}>
+                      <ShieldAlert size={12} color={COLORS.amber} />
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
+
+        <ProvenanceSection provenance={breach.provenance} />
 
         <CredentialExposure breach={breach} />
 
