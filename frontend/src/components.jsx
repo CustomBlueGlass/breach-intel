@@ -3,7 +3,7 @@ import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
   FileText, ExternalLink, Download, Copy, Link2, Check, Archive, ShieldCheck,
-  Newspaper, SlidersHorizontal, Save, Trash2, Star,
+  Newspaper, SlidersHorizontal, Save, Trash2, Star, Sparkles,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -909,6 +909,48 @@ function buildTimeline(breach) {
     .filter((e) => { const k = e.date + '|' + e.label; if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
+// Turn one breach_enrichment_log `changed` object into plain-language lines
+// describing what the re-enrichment loop improved. Each field carries {from,to}
+// (from is absent when the value was previously empty), so we phrase a first
+// value as "recorded"/"identified" and a real change as "from → to".
+const ENH_FIELD_LABEL = {
+  records_affected_est: 'Records affected',
+  data_types_exposed: 'Data exposed',
+  ransomware_group: 'Threat actor',
+  incident_date: 'Incident date',
+  disclosed_date: 'Publicly disclosed',
+};
+function describeEnrichment(changed) {
+  const out = [];
+  const has = (v) => v !== null && v !== undefined && v !== '';
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  for (const [field, ch] of Object.entries(changed || {})) {
+    if (!ch || typeof ch !== 'object') continue;
+    const label = ENH_FIELD_LABEL[field] || field.replace(/_/g, ' ');
+    if (field === 'data_types_exposed') {
+      const before = arr(ch.from).map((x) => String(x).replace(/_/g, ' '));
+      const after = arr(ch.to).map((x) => String(x).replace(/_/g, ' '));
+      if (before.length === 0 && after.length) { out.push(`${label}: recorded ${after.join(', ')}`); continue; }
+      const added = after.filter((x) => !before.includes(x));
+      if (added.length) out.push(`${label}: added ${added.join(', ')}`);
+      continue;
+    }
+    if (field === 'records_affected_est') {
+      const to = has(ch.to) ? fmtNumber(ch.to) : '-';
+      out.push(has(ch.from) ? `${label}: ${fmtNumber(ch.from)} → ${to}` : `${label}: recorded ${to}`);
+      continue;
+    }
+    if (field === 'ransomware_group') {
+      out.push(has(ch.from) ? `${label}: ${ch.from} → ${ch.to}` : `${label}: identified as ${ch.to}`);
+      continue;
+    }
+    // dates and any future scalar fields
+    const to = has(ch.to) ? fmtDate(String(ch.to).slice(0, 10)) : '-';
+    out.push(has(ch.from) ? `${label}: ${fmtDate(String(ch.from).slice(0, 10))} → ${to}` : `${label}: set to ${to}`);
+  }
+  return out;
+}
+
 function RelatedRow({ b, onOpen }) {
   const sev = SEVERITY_META[b.severity] || SEVERITY_META.unrated;
   return (
@@ -1079,6 +1121,40 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
                     <span className="absolute rounded-full" style={{ left: -13, top: 5, width: 7, height: 7, backgroundColor: TIMELINE_KIND[e.kind] || COLORS.boneFaint }} />
                     <span className="text-xs shrink-0" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO, width: 96 }}>{fmtDate(e.date)}</span>
                     <span className="text-sm" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>{e.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
+        {(() => {
+          const entries = (breach.enhancements || [])
+            .map((e) => ({ at: e.enriched_at, lines: describeEnrichment(e.changed) }))
+            .filter((e) => e.lines.length > 0);
+          if (entries.length === 0) return null;
+          return (
+            <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+              <div className="flex items-center gap-2 mb-1">
+                <Sparkles size={14} color={COLORS.teal} />
+                <span className="text-xs uppercase tracking-widest" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+                  Enhancement history
+                </span>
+              </div>
+              <div className="text-xs mb-3" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
+                This record improved automatically as more was disclosed. Last enhanced {relativeTime(entries[0].at)}.
+              </div>
+              <div className="relative pl-4">
+                <div className="absolute top-1 bottom-1" style={{ left: 3, width: 1, backgroundColor: COLORS.line }} />
+                {entries.map((e, i) => (
+                  <div key={i} className="relative pb-3 last:pb-0">
+                    <span className="absolute rounded-full" style={{ left: -13, top: 5, width: 7, height: 7, backgroundColor: COLORS.teal }} />
+                    <div className="text-xs mb-1" style={{ color: COLORS.boneDim, fontFamily: FONT_MONO }}>{fmtDate(String(e.at).slice(0, 10))}</div>
+                    <ul className="space-y-0.5">
+                      {e.lines.map((ln, j) => (
+                        <li key={j} className="text-sm" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>{ln}</li>
+                      ))}
+                    </ul>
                   </div>
                 ))}
               </div>

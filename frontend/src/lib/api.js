@@ -153,6 +153,22 @@ export async function fetchBreachDetail(id) {
     related_news = [];
   }
 
+  // Enhancement history: what the maintenance re-enrichment loop improved on
+  // this breach over time (records, data types, actor, dates), newest first.
+  // Best-effort — an older database without the log table yields an empty list.
+  let enhancements = [];
+  try {
+    const { data: log } = await supabase
+      .from('breach_enrichment_log')
+      .select('changed, enriched_at')
+      .eq('breach_id', id)
+      .order('enriched_at', { ascending: false })
+      .limit(50);
+    enhancements = log || [];
+  } catch {
+    enhancements = [];
+  }
+
   // Related breaches: other victims of the same threat actor, and other
   // incidents at the same company (repeat victims). Best-effort; excludes the
   // current breach.
@@ -179,6 +195,7 @@ export async function fetchBreachDetail(id) {
     breach,
     evidence,
     related_news,
+    enhancements,
     related,
     linked_sources: (sources || []).map((s) => ({
       source_name: s.breach_data_sources?.name,
