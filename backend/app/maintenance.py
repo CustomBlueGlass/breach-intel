@@ -669,15 +669,20 @@ END $$
 # Append-only audit trail of what the re-enrichment loop changed on each
 # breach and when, so the dossier can show "this record improved as more was
 # disclosed." Created here (IF NOT EXISTS) so existing databases pick it up.
+# asyncpg refuses multiple commands in one prepared statement, so the table
+# plus its indexes are wrapped in a single DO block (one command to the driver).
 ENSURE_ENRICHMENT_LOG = """
-CREATE TABLE IF NOT EXISTS breach_enrichment_log (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    breach_id   UUID NOT NULL REFERENCES breaches(id) ON DELETE CASCADE,
-    changed     JSONB NOT NULL,
-    enriched_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_enrichment_log_breach ON breach_enrichment_log (breach_id);
-CREATE INDEX IF NOT EXISTS idx_enrichment_log_time ON breach_enrichment_log (enriched_at DESC);
+DO $$
+BEGIN
+    CREATE TABLE IF NOT EXISTS breach_enrichment_log (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        breach_id   UUID NOT NULL REFERENCES breaches(id) ON DELETE CASCADE,
+        changed     JSONB NOT NULL,
+        enriched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_enrichment_log_breach ON breach_enrichment_log (breach_id);
+    CREATE INDEX IF NOT EXISTS idx_enrichment_log_time ON breach_enrichment_log (enriched_at DESC);
+END $$
 """
 
 
