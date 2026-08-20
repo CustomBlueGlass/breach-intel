@@ -210,8 +210,8 @@ export default function App() {
     setDetailError(null);
     window.history.replaceState(null, '', `#breach=${b.id}`);
     fetchBreachDetail(b.id)
-      .then(({ breach, linked_sources, evidence, related_news, enhancements, related }) => {
-        setDetail({ ...breach, linked_sources, evidence, related_news, enhancements, related });
+      .then(({ breach, linked_sources, evidence, related_news, enhancements, developments, related }) => {
+        setDetail({ ...breach, linked_sources, evidence, related_news, enhancements, developments, related });
         pushRecentBreach(breach);
       })
       .catch((e) => {

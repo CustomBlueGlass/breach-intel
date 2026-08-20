@@ -169,6 +169,22 @@ export async function fetchBreachDetail(id) {
     enhancements = [];
   }
 
+  // Post-incident developments: regulatory fines, litigation and settlements
+  // detected on this breach after disclosure, newest first. Best-effort — an
+  // older database without the table yields an empty list.
+  let developments = [];
+  try {
+    const { data: dev } = await supabase
+      .from('breach_developments')
+      .select('kind, title, detail, url, source_name, occurred_at')
+      .eq('breach_id', id)
+      .order('occurred_at', { ascending: false, nullsFirst: false })
+      .limit(50);
+    developments = dev || [];
+  } catch {
+    developments = [];
+  }
+
   // Related breaches: other victims of the same threat actor, and other
   // incidents at the same company (repeat victims). Best-effort; excludes the
   // current breach.
@@ -196,6 +212,7 @@ export async function fetchBreachDetail(id) {
     evidence,
     related_news,
     enhancements,
+    developments,
     related,
     linked_sources: (sources || []).map((s) => ({
       source_name: s.breach_data_sources?.name,
