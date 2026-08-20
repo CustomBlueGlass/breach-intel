@@ -148,6 +148,15 @@ export function MethodologyView({ onAbout }) {
         </p>
       </Prose>
 
+      <Prose label="Machine-readable feed">
+        <p>
+          The ledger is available as a STIX 2.1 bundle at <span style={{ fontFamily: FONT_MONO, color: COLORS.bone }}>/api/stix</span>,
+          so a security team can pull it straight into a threat-intelligence platform such as OpenCTI or MISP. Each breach
+          is a STIX identity carrying the incident facts, with a deduplicated intrusion-set per named threat actor plus a
+          dated targets relationship. The feed is keyless, read-only plus filterable by group, industry or disclosure date.
+        </p>
+      </Prose>
+
       <Prose label="What it deliberately does not do">
         <p>
           The platform holds breach-level facts only: the company, the dates, the data categories plus an estimate

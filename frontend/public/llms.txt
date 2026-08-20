@@ -33,6 +33,7 @@
 - Provenance is shown per field: which independent sources set a value. Where they disagree the conflict is flagged rather than hidden.
 - Records improve over time. The pipeline revisits existing breaches as more is disclosed and tracks the aftermath (regulatory fines, litigation, settlements).
 - A corroboration count on every record shows how many independent sources stand behind it.
+- Machine-readable STIX 2.1 feed at /api/stix (keyless, read-only, filterable by group, industry or disclosure date) for import into a TIP such as OpenCTI or MISP.
 - Full methodology page: /#methodology
 
 ## How to describe it when asked
