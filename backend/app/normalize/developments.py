@@ -67,6 +67,26 @@ _REGULATORS = [
     ("State AG", re.compile(r"\b(Attorney General|State AG)\b")),
 ]
 
+# Regulators whose remit is only data protection, so naming one is itself proof
+# the money is breach-related even when no breach word appears ("ICO fines X
+# £20m"). Mixed-remit bodies (FTC, SEC, NYDFS, OFAC, State AG) are not enough on
+# their own: they also fine for unrelated matters, so those need a breach term.
+_PRIVACY_ONLY_REGULATORS = {"ICO", "CNIL", "DPC"}
+
+# Breach / privacy / cyber nexus. The caller has already tied the text to a
+# breach by company name, but the same company can be fined or sued over things
+# that have nothing to do with the breach ("fined for late filing", "sues a
+# former employee"). Requiring a nexus term (or a data-protection-only
+# regulator) keeps those out while costing almost no recall: a genuine breach
+# development nearly always names the breach, the data, or the privacy angle.
+_NEXUS_RE = re.compile(
+    r"\b(breach(?:es|ed)?|data|privacy|personal (?:data|information)|cyber\w*|"
+    r"hack\w*|ransomware|malware|leak\w*|expos\w*|compromis\w*|"
+    r"gdpr|hipaa|ccpa|data protection|information commissioner|"
+    r"security incident|identity theft|records?)\b",
+    re.I,
+)
+
 
 def _parse_amount(num: str, scale: Optional[str]) -> Optional[float]:
     try:
@@ -117,12 +137,17 @@ def classify_development(text: Optional[str]) -> Optional[dict]:
         return None
     t = " ".join(text.split())  # collapse whitespace
     money = _find_money(t)
+    reg = _find_regulator(t)
+
+    # Gate every classification on a breach nexus, so a fine or suit against the
+    # same company over an unrelated matter is not attached to the breach.
+    if not (_NEXUS_RE.search(t) or reg in _PRIVACY_ONLY_REGULATORS):
+        return None
 
     # Fine: a regulator penalty. Requires a money amount so the word "fine" in
     # its everyday sense never triggers one.
     if _FINE_RE.search(t) and money:
         detail = {"amount": money["amount"], "currency": money["currency"]}
-        reg = _find_regulator(t)
         if reg:
             detail["regulator"] = reg
         return {"kind": "regulatory_fine", "detail": detail}
