@@ -154,7 +154,7 @@ END $$
 PUBLIC_READ_TABLES = [
     "breaches", "breach_companies", "breach_source_records",
     "breach_match_queue", "breach_data_sources", "breach_collector_log",
-    "threat_actors", "news_watch", "threat_radar",
+    "threat_actors", "news_watch", "threat_radar", "breach_enrichment_log",
 ]
 PUBLIC_READ_VIEWS = [
     "mv_breach_ledger", "mv_breach_trends", "mv_top_ransomware_groups",
@@ -666,12 +666,28 @@ END $$
 """
 
 
+# Append-only audit trail of what the re-enrichment loop changed on each
+# breach and when, so the dossier can show "this record improved as more was
+# disclosed." Created here (IF NOT EXISTS) so existing databases pick it up.
+ENSURE_ENRICHMENT_LOG = """
+CREATE TABLE IF NOT EXISTS breach_enrichment_log (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    breach_id   UUID NOT NULL REFERENCES breaches(id) ON DELETE CASCADE,
+    changed     JSONB NOT NULL,
+    enriched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_enrichment_log_breach ON breach_enrichment_log (breach_id);
+CREATE INDEX IF NOT EXISTS idx_enrichment_log_time ON breach_enrichment_log (enriched_at DESC);
+"""
+
+
 async def ensure_views(session) -> None:
     # Take the DDL lock first, before ALTER / CREATE MATERIALIZED VIEW / GRANT
     # below acquire any table locks.
     await session.execute(text("SELECT pg_advisory_xact_lock(CAST(:k AS bigint))"), {"k": DDL_ADVISORY_LOCK})
     await session.execute(text(ENSURE_BREACH_COLUMNS))
     await session.execute(text(ENSURE_LEDGER_HAS_FLAGS))
+    await session.execute(text(ENSURE_ENRICHMENT_LOG))
     await session.execute(text(PLATFORM_STATS_VIEW))
     await session.execute(text(REFRESH_FUNCTION))
     await session.execute(text(GRANT_STATS_VIEW))
@@ -715,6 +731,96 @@ async def backfill_attack_cve(session) -> None:
             updated += 1
     if updated:
         logger.info("Tagged %d breaches with CVEs / ATT&CK techniques from source text", updated)
+
+
+# The re-enrichment loop. Unlike backfill_breach_fields (which only fills a
+# breach field that is still NULL), this revisits every breach and lets its
+# facts IMPROVE from the full set of currently-linked source records as more is
+# disclosed over time: a higher/confirmed record count (GREATEST), additional
+# exposed-data categories (set union), and a threat actor named by a source
+# that arrived later (COALESCE). Dates are fill-only, never moved, so a curated
+# or earlier date is never regressed. Every change is written to
+# breach_enrichment_log so the dossier can show that the record got better, and
+# the whole thing is idempotent: once a breach reflects the best of its sources,
+# later passes compute the same values and log nothing.
+REENRICH_SQL = """
+WITH src AS (
+    SELECT r.matched_breach_id AS bid,
+        min(r.incident_date) FILTER (
+            WHERE r.incident_date >= DATE '2000-01-01' AND r.incident_date <= CURRENT_DATE + 2) AS min_inc,
+        min(CAST(r.source_published_at AS date)) FILTER (
+            WHERE CAST(r.source_published_at AS date) >= DATE '2000-01-01'
+              AND CAST(r.source_published_at AS date) <= CURRENT_DATE + 2) AS min_disc,
+        max(r.records_affected_est) AS max_records,
+        (array_agg(r.ransomware_group_norm) FILTER (WHERE r.ransomware_group_norm IS NOT NULL))[1] AS any_group
+    FROM breach_source_records r
+    WHERE r.matched_breach_id IS NOT NULL
+    GROUP BY r.matched_breach_id
+),
+dts AS (
+    SELECT r.matched_breach_id AS bid, array_agg(DISTINCT d) AS dtypes
+    FROM breach_source_records r
+    CROSS JOIN LATERAL unnest(COALESCE(r.data_types_exposed, '{}'::text[])) AS d
+    WHERE r.matched_breach_id IS NOT NULL
+    GROUP BY r.matched_breach_id
+),
+d AS (
+    SELECT b.id,
+        COALESCE(b.incident_date, s.min_inc) AS inc_date,
+        COALESCE(b.disclosed_date, s.min_disc, b.incident_date, s.min_inc) AS disc_date,
+        GREATEST(b.records_affected_est, s.max_records) AS records,
+        COALESCE(
+            (SELECT array_agg(DISTINCT x)
+             FROM unnest(COALESCE(b.data_types_exposed, '{}'::text[]) || COALESCE(dts.dtypes, '{}'::text[])) AS x),
+            b.data_types_exposed) AS data_types,
+        COALESCE(b.ransomware_group, s.any_group) AS grp,
+        b.incident_date AS old_inc, b.disclosed_date AS old_disc,
+        b.records_affected_est AS old_records, b.data_types_exposed AS old_dt,
+        b.ransomware_group AS old_grp
+    FROM breaches b
+    JOIN src s ON s.bid = b.id
+    LEFT JOIN dts ON dts.bid = b.id
+),
+diffed AS (
+    SELECT d.*,
+        jsonb_strip_nulls(jsonb_build_object(
+            'records_affected_est', CASE WHEN d.records IS DISTINCT FROM d.old_records
+                THEN jsonb_build_object('from', d.old_records, 'to', d.records) END,
+            'data_types_exposed', CASE WHEN NOT (
+                    COALESCE(d.data_types, '{}'::text[]) @> COALESCE(d.old_dt, '{}'::text[])
+                AND COALESCE(d.data_types, '{}'::text[]) <@ COALESCE(d.old_dt, '{}'::text[]))
+                THEN jsonb_build_object('from', to_jsonb(d.old_dt), 'to', to_jsonb(d.data_types)) END,
+            'ransomware_group', CASE WHEN d.grp IS DISTINCT FROM d.old_grp
+                THEN jsonb_build_object('from', d.old_grp, 'to', d.grp) END,
+            'incident_date', CASE WHEN d.inc_date IS DISTINCT FROM d.old_inc
+                THEN jsonb_build_object('from', d.old_inc, 'to', d.inc_date) END,
+            'disclosed_date', CASE WHEN d.disc_date IS DISTINCT FROM d.old_disc
+                THEN jsonb_build_object('from', d.old_disc, 'to', d.disc_date) END
+        )) AS changed
+    FROM d
+),
+ins AS (
+    INSERT INTO breach_enrichment_log (breach_id, changed)
+    SELECT id, changed FROM diffed WHERE changed <> '{}'::jsonb
+    RETURNING 1
+)
+UPDATE breaches b SET
+    incident_date = df.inc_date,
+    disclosed_date = df.disc_date,
+    records_affected_est = df.records,
+    data_types_exposed = df.data_types,
+    ransomware_group = df.grp,
+    last_updated_at = now()
+FROM diffed df
+WHERE b.id = df.id AND df.changed <> '{}'::jsonb
+"""
+
+
+async def reenrich_breaches(session) -> None:
+    res = await session.execute(text(REENRICH_SQL))
+    if res.rowcount:
+        logger.info("Re-enriched %d breach(es) from newer/richer source data", res.rowcount)
+        await recompute_severity(session)
 
 
 # Hand-verified corrections to individual breaches. The ledger is machine-built,
@@ -812,6 +918,8 @@ async def run_maintenance() -> None:
         await ensure_views(session)
     async with get_session() as session:
         await backfill_attack_cve(session)
+    async with get_session() as session:
+        await reenrich_breaches(session)
     async with get_session() as session:
         await apply_curated_fixes(session)
     async with get_session() as session:
