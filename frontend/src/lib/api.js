@@ -100,6 +100,71 @@ export async function searchLedger(q, limit = 8) {
   return data || [];
 }
 
+// Field-level provenance and conflict surfacing. Every breach field is derived
+// from the linked source records, and each source row keeps its own asserted
+// value, so we can show — read-time, no extra storage — which independent
+// sources set a field and where they disagree. The ledger value stays the
+// platform's reconciled figure (earliest date, largest verified count, union
+// of data types); this just exposes the underlying agreement.
+function buildProvenance(breach, sources) {
+  const rows = sources || [];
+  const clean = (v) => (v === null || v === undefined || v === '' ? null : v);
+  const meta = (s) => ({
+    name: s.breach_data_sources?.name || 'source',
+    category: s.breach_data_sources?.category || null,
+    url: s.source_record_url || null,
+    published_at: s.source_published_at || null,
+  });
+  const out = [];
+
+  const field = (id, label, current, getVal, opts = {}) => {
+    const getKey = opts.key || ((v) => String(v).trim().toLowerCase());
+    const entries = [];
+    for (const s of rows) {
+      const v = clean(getVal(s));
+      if (v === null || (Array.isArray(v) && v.length === 0)) continue;
+      entries.push({ ...meta(s), value: v, key: getKey(v) });
+    }
+    if (entries.length === 0) return;
+    const conflict = opts.conflict
+      ? opts.conflict(entries)
+      : new Set(entries.map((e) => e.key)).size > 1;
+    out.push({ id, label, current, conflict, sources: entries });
+  };
+
+  field('ransomware_group', 'Threat actor', breach.ransomware_group,
+    (s) => s.ransomware_group_raw || s.ransomware_group_norm,
+    { key: (v) => String(v).trim().toLowerCase() });
+
+  field('records_affected_est', 'Records affected', breach.records_affected_est,
+    (s) => s.records_affected_est, {
+      // Only a material spread is a conflict; 4,999 vs 5,000 is not.
+      conflict: (entries) => {
+        const nums = entries.map((e) => Number(e.value)).filter((n) => !Number.isNaN(n) && n > 0);
+        if (nums.length < 2) return false;
+        const mn = Math.min(...nums), mx = Math.max(...nums);
+        return mx >= mn * 1.5;
+      },
+    });
+
+  field('incident_date', 'Incident date', breach.incident_date,
+    (s) => (s.incident_date ? String(s.incident_date).slice(0, 10) : null), {
+      // Dates outside the 45-day same-incident window count as disagreement.
+      conflict: (entries) => {
+        const t = entries.map((e) => Date.parse(e.value)).filter((n) => !Number.isNaN(n));
+        return t.length >= 2 && (Math.max(...t) - Math.min(...t)) > 45 * 86400000;
+      },
+    });
+
+  field('industry', 'Industry', breach.industry, (s) => s.industry);
+
+  field('location', 'Location',
+    [breach.region_state, breach.country].filter(Boolean).join(', ') || null,
+    (s) => [s.region_state, s.country].filter(Boolean).join(', ') || null);
+
+  return out;
+}
+
 export async function fetchBreachDetail(id) {
   const [{ data: breach, error: breachErr }, { data: sources, error: sourcesErr }] = await Promise.all([
     supabase.from('breaches').select('*').eq('id', id).single(),
@@ -107,6 +172,8 @@ export async function fetchBreachDetail(id) {
       .from('breach_source_records')
       .select(
         'id, source_record_url, document_type, summary, source_published_at, match_confidence, ' +
+        'records_affected_est, data_types_exposed, ransomware_group_norm, ransomware_group_raw, ' +
+        'incident_date, industry, region_state, country, ' +
         'raw_payload, breach_data_sources ( name, category )'
       )
       .eq('matched_breach_id', id)
@@ -213,6 +280,7 @@ export async function fetchBreachDetail(id) {
     related_news,
     enhancements,
     developments,
+    provenance: breach ? buildProvenance(breach, sources) : [],
     related,
     linked_sources: (sources || []).map((s) => ({
       source_name: s.breach_data_sources?.name,
