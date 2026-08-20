@@ -932,6 +932,25 @@ async def detect_developments(session) -> None:
         if after > before:
             logger.info("Detected %d new post-incident development(s) (fines / litigation / settlements)", after - before)
 
+    # Self-heal: drop stored developments whose text no longer classifies as the
+    # same kind under the current rules, so tightening the classifier (e.g. the
+    # breach-nexus guard) retroactively cleans out earlier false positives. Only
+    # ever removes rows that fail the current check; genuine developments stay.
+    stored = (await session.execute(
+        text("SELECT id, kind, title FROM breach_developments")
+    )).fetchall()
+    stale = []
+    for r in stored:
+        cc = classify_development(r.title)
+        if not cc or cc["kind"] != r.kind:
+            stale.append(str(r.id))
+    if stale:
+        await session.execute(
+            text("DELETE FROM breach_developments WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": stale},
+        )
+        logger.info("Removed %d stale development(s) no longer matching the classifier", len(stale))
+
     # Flag breaches that now carry a development, and clear the flag from any
     # that no longer do, so the ledger badge stays accurate.
     await session.execute(text(
