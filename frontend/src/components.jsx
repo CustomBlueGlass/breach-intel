@@ -3,7 +3,7 @@ import {
   Search, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown,
   ShieldAlert, X, Inbox, ListChecks, CheckCircle2, Lock,
   FileText, ExternalLink, Download, Copy, Link2, Check, Archive, ShieldCheck,
-  Newspaper, SlidersHorizontal, Save, Trash2, Star, Sparkles,
+  Newspaper, SlidersHorizontal, Save, Trash2, Star, Sparkles, Scale,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -367,6 +367,24 @@ export function FilterBar({ filters, setFilters, sortBy, setSortBy, sortDir, set
 // tags it so the site shows it needs a manual fix instead of a wrong date.
 export const needsDateReview = (b) => Array.isArray(b?.data_flags) && b.data_flags.includes('date_needs_review');
 
+// A breach carries 'has_developments' when maintenance detected a post-incident
+// development (regulatory fine, litigation or settlement) tied to it. Used to
+// badge the ledger row so a breach whose story continued stands out.
+export const hasDevelopments = (b) => Array.isArray(b?.data_flags) && b.data_flags.includes('has_developments');
+
+// Compact ledger badge for a breach with a known aftermath.
+export function AftermathPill() {
+  return (
+    <span
+      title="This breach has a known aftermath: a regulatory fine, lawsuit or settlement. Open the record for details."
+      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 shrink-0"
+      style={{ color: COLORS.amberSoft, backgroundColor: 'rgba(201,154,82,0.14)', fontFamily: FONT_MONO, fontSize: 10 }}
+    >
+      <Scale size={10} /> aftermath
+    </span>
+  );
+}
+
 export function DateReviewPill({ compact = false }) {
   return (
     <span
@@ -470,8 +488,11 @@ export const LEDGER_COLUMNS = [
     text: (b) => b.canonical_name || '',
     cell: (b) => (
       <>
-        <div className="truncate group-hover:underline" style={{ color: COLORS.bone, fontFamily: FONT_BODY, fontWeight: 500 }}>
-          {b.canonical_name}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="truncate group-hover:underline" style={{ color: COLORS.bone, fontFamily: FONT_BODY, fontWeight: 500 }}>
+            {b.canonical_name}
+          </span>
+          {hasDevelopments(b) && <AftermathPill />}
         </div>
         <div className="truncate" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO, fontSize: 11 }}>
           {[INDUSTRY_LABELS[b.industry] || b.industry, [b.region_state, b.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '-'}
@@ -587,7 +608,10 @@ export function LedgerCard({ b, onOpen, onActorClick }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-medium truncate" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>{b.canonical_name}</div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-sm font-medium truncate" style={{ color: COLORS.bone, fontFamily: FONT_BODY }}>{b.canonical_name}</span>
+            {hasDevelopments(b) && <AftermathPill />}
+          </div>
           <div className="text-xs truncate" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>
             {[INDUSTRY_LABELS[b.industry] || b.industry, [b.region_state, b.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '-'}
           </div>
@@ -951,6 +975,28 @@ function describeEnrichment(changed) {
   return out;
 }
 
+// Post-incident developments: how the aftermath (fines, lawsuits, settlements)
+// is labelled and coloured in the dossier.
+const CURRENCY_SYMBOL = { GBP: '£', USD: '$', EUR: '€' };
+function fmtMoney(amount, currency) {
+  if (amount == null || Number.isNaN(Number(amount))) return null;
+  const sym = CURRENCY_SYMBOL[currency] || '';
+  return `${sym}${fmtNumber(Math.round(Number(amount)))}${sym ? '' : (currency ? ` ${currency}` : '')}`;
+}
+const DEV_KIND_META = {
+  regulatory_fine: { label: 'Regulatory fine', color: COLORS.red, bg: 'rgba(192,71,58,0.12)' },
+  settlement: { label: 'Settlement', color: COLORS.teal, bg: 'rgba(79,157,140,0.12)' },
+  litigation: { label: 'Litigation', color: COLORS.amber, bg: 'rgba(217,142,51,0.12)' },
+};
+// A short structured headline for a development, e.g. "£20,000,000 by ICO".
+function developmentSummary(dev) {
+  const d = dev.detail || {};
+  const money = fmtMoney(d.amount, d.currency);
+  if (dev.kind === 'regulatory_fine') return [money, d.regulator ? `by ${d.regulator}` : null].filter(Boolean).join(' ');
+  if (dev.kind === 'settlement') return money || '';
+  return money || '';
+}
+
 function RelatedRow({ b, onOpen }) {
   const sev = SEVERITY_META[b.severity] || SEVERITY_META.unrated;
   return (
@@ -1127,6 +1173,51 @@ export function BreachDetailDrawer({ breach, onClose, isOpen, loading, error, on
             </div>
           );
         })()}
+
+        {(breach.developments || []).length > 0 && (
+          <div className="px-6 py-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <div className="flex items-center gap-2 mb-1">
+              <Scale size={14} color={COLORS.amberSoft} />
+              <span className="text-xs uppercase tracking-widest" style={{ fontFamily: FONT_MONO, color: COLORS.boneFaint, letterSpacing: '0.12em' }}>
+                Developments
+              </span>
+            </div>
+            <div className="text-xs mb-3" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
+              What happened after disclosure: regulatory fines, litigation plus settlements correlated to this breach.
+            </div>
+            <div className="flex flex-col gap-2">
+              {breach.developments.map((dev, i) => {
+                const meta = DEV_KIND_META[dev.kind] || { label: dev.kind, color: COLORS.boneDim, bg: COLORS.panelAlt };
+                const summary = developmentSummary(dev);
+                const body = (
+                  <>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs px-2 py-0.5 rounded-full shrink-0" style={{ fontFamily: FONT_MONO, color: meta.color, backgroundColor: meta.bg }}>
+                        {meta.label}
+                      </span>
+                      {summary && <span className="text-sm" style={{ color: COLORS.bone, fontFamily: FONT_MONO }}>{summary}</span>}
+                      {dev.occurred_at && <span className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>· {fmtDate(String(dev.occurred_at).slice(0, 10))}</span>}
+                    </div>
+                    <div className="text-sm mt-1" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>{dev.title}</div>
+                    {dev.source_name && <div className="text-xs mt-0.5" style={{ color: COLORS.boneFaint, fontFamily: FONT_MONO }}>via {dev.source_name}</div>}
+                  </>
+                );
+                return safeUrl(dev.url) ? (
+                  <a key={i} href={safeUrl(dev.url)} target="_blank" rel="noopener noreferrer"
+                     className="block rounded-md px-3 py-2 hover:underline" style={{ border: `1px solid ${COLORS.line}` }}
+                     title="Opens the source in a new tab">
+                    {body}
+                  </a>
+                ) : (
+                  <div key={i} className="rounded-md px-3 py-2" style={{ border: `1px solid ${COLORS.line}` }}>{body}</div>
+                );
+              })}
+            </div>
+            <div className="mt-2 text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>
+              Auto-detected from breach-matched reporting; links out to the source. Amounts are as reported.
+            </div>
+          </div>
+        )}
 
         {(() => {
           const entries = (breach.enhancements || [])

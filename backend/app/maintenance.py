@@ -30,6 +30,7 @@ from app.collectors.registry import NOT_YET_IMPLEMENTED_SLUGS, PLACEHOLDER_HTML_
 from app.correlation.merge import BREACH_CREATING_DOC_TYPES, recompute_severity
 from app.db import get_session, run_resiliently
 from app.normalize.attack_cve import extract_cves, map_techniques
+from app.normalize.developments import classify_development
 from app.normalize.company_name import normalize_company_name
 from app.normalize.ransomware_group_aliases import normalize_ransomware_group
 
@@ -155,6 +156,7 @@ PUBLIC_READ_TABLES = [
     "breaches", "breach_companies", "breach_source_records",
     "breach_match_queue", "breach_data_sources", "breach_collector_log",
     "threat_actors", "news_watch", "threat_radar", "breach_enrichment_log",
+    "breach_developments",
 ]
 PUBLIC_READ_VIEWS = [
     "mv_breach_ledger", "mv_breach_trends", "mv_top_ransomware_groups",
@@ -686,6 +688,32 @@ END $$
 """
 
 
+# Post-incident developments attached to an existing breach: regulatory fines,
+# litigation and settlements that surface after disclosure. One row per detected
+# development, deduped per breach by a stable key. Wrapped in a DO block so the
+# table plus its index reach asyncpg as a single command.
+ENSURE_DEVELOPMENTS = """
+DO $$
+BEGIN
+    CREATE TABLE IF NOT EXISTS breach_developments (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        breach_id   UUID NOT NULL REFERENCES breaches(id) ON DELETE CASCADE,
+        kind        TEXT NOT NULL,
+        title       TEXT NOT NULL,
+        detail      JSONB NOT NULL DEFAULT '{}',
+        url         TEXT,
+        source_name TEXT,
+        occurred_at DATE,
+        dedupe_key  TEXT NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (breach_id, dedupe_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_developments_breach ON breach_developments (breach_id);
+    CREATE INDEX IF NOT EXISTS idx_developments_kind ON breach_developments (kind);
+END $$
+"""
+
+
 async def ensure_views(session) -> None:
     # Take the DDL lock first, before ALTER / CREATE MATERIALIZED VIEW / GRANT
     # below acquire any table locks.
@@ -693,6 +721,7 @@ async def ensure_views(session) -> None:
     await session.execute(text(ENSURE_BREACH_COLUMNS))
     await session.execute(text(ENSURE_LEDGER_HAS_FLAGS))
     await session.execute(text(ENSURE_ENRICHMENT_LOG))
+    await session.execute(text(ENSURE_DEVELOPMENTS))
     await session.execute(text(PLATFORM_STATS_VIEW))
     await session.execute(text(REFRESH_FUNCTION))
     await session.execute(text(GRANT_STATS_VIEW))
@@ -828,6 +857,96 @@ async def reenrich_breaches(session) -> None:
         await recompute_severity(session)
 
 
+# Insert any classified developments in one statement (asyncpg-safe): the
+# per-row values arrive as parallel arrays and are unnested server-side.
+# text[]::jsonb[] casts the JSON strings to jsonb. ON CONFLICT keeps it
+# idempotent per (breach_id, dedupe_key).
+INSERT_DEVELOPMENTS_SQL = """
+INSERT INTO breach_developments (breach_id, kind, title, detail, url, source_name, occurred_at, dedupe_key)
+SELECT * FROM unnest(
+    CAST(:bids AS uuid[]), CAST(:kinds AS text[]), CAST(:titles AS text[]),
+    CAST(:details AS jsonb[]), CAST(:urls AS text[]), CAST(:sources AS text[]),
+    CAST(:occurred AS date[]), CAST(:keys AS text[]))
+ON CONFLICT (breach_id, dedupe_key) DO NOTHING
+"""
+
+
+async def detect_developments(session) -> None:
+    """
+    Scan every breach-matched text (news-watch headlines + source-record
+    summaries) for post-incident developments — regulatory fines, litigation
+    and settlements — and attach them to the breach as breach_developments
+    rows. Then set/clear the 'has_developments' data flag so the ledger can
+    badge a breach whose story continued. Idempotent: rows are deduped per
+    breach and re-runs insert nothing new.
+    """
+    import hashlib
+    import json
+
+    candidates: list = []
+    # news_watch is created by the news-watch job and may be absent on a fresh
+    # database; include it only when present.
+    has_news = (await session.execute(
+        text("SELECT to_regclass('public.news_watch') IS NOT NULL")
+    )).scalar()
+    if has_news:
+        candidates += (await session.execute(text(
+            "SELECT matched_breach_id AS bid, title AS txt, url, source_name, "
+            "CAST(published_at AS date) AS occurred "
+            "FROM news_watch WHERE matched_breach_id IS NOT NULL"
+        ))).fetchall()
+    candidates += (await session.execute(text(
+        "SELECT r.matched_breach_id AS bid, r.summary AS txt, r.source_record_url AS url, "
+        "s.name AS source_name, CAST(r.source_published_at AS date) AS occurred "
+        "FROM breach_source_records r LEFT JOIN breach_data_sources s ON s.id = r.source_id "
+        "WHERE r.matched_breach_id IS NOT NULL AND r.summary IS NOT NULL"
+    ))).fetchall()
+
+    cols = {"bids": [], "kinds": [], "titles": [], "details": [], "urls": [], "sources": [], "occurred": [], "keys": []}
+    seen: set = set()
+    for row in candidates:
+        cls = classify_development(row.txt)
+        if not cls:
+            continue
+        bid = str(row.bid)
+        url = row.url or ""
+        # Stable per-breach key: kind + the source link (or the text when there
+        # is no link), so the same story is not attached twice.
+        key = hashlib.sha1(f"{cls['kind']}|{url or row.txt}".encode("utf-8")).hexdigest()[:16]
+        if (bid, key) in seen:
+            continue
+        seen.add((bid, key))
+        cols["bids"].append(bid)
+        cols["kinds"].append(cls["kind"])
+        cols["titles"].append((row.txt or "")[:400])
+        cols["details"].append(json.dumps(cls["detail"]))
+        cols["urls"].append(row.url)
+        cols["sources"].append(row.source_name)
+        cols["occurred"].append(row.occurred)
+        cols["keys"].append(key)
+
+    if cols["bids"]:
+        before = (await session.execute(text("SELECT count(*) FROM breach_developments"))).scalar()
+        await session.execute(text(INSERT_DEVELOPMENTS_SQL), cols)
+        after = (await session.execute(text("SELECT count(*) FROM breach_developments"))).scalar()
+        if after > before:
+            logger.info("Detected %d new post-incident development(s) (fines / litigation / settlements)", after - before)
+
+    # Flag breaches that now carry a development, and clear the flag from any
+    # that no longer do, so the ledger badge stays accurate.
+    await session.execute(text(
+        "UPDATE breaches SET data_flags = "
+        "(SELECT array_agg(DISTINCT f) FROM unnest(data_flags || ARRAY['has_developments']) AS f) "
+        "WHERE id IN (SELECT DISTINCT breach_id FROM breach_developments) "
+        "AND NOT ('has_developments' = ANY(data_flags))"
+    ))
+    await session.execute(text(
+        "UPDATE breaches SET data_flags = array_remove(data_flags, 'has_developments') "
+        "WHERE 'has_developments' = ANY(data_flags) "
+        "AND id NOT IN (SELECT DISTINCT breach_id FROM breach_developments)"
+    ))
+
+
 # Hand-verified corrections to individual breaches. The ledger is machine-built,
 # so a mis-parsed source occasionally needs an override. Corrections live here
 # (reviewed in git, never edited into the database by hand) and run near the end
@@ -925,6 +1044,8 @@ async def run_maintenance() -> None:
         await backfill_attack_cve(session)
     async with get_session() as session:
         await reenrich_breaches(session)
+    async with get_session() as session:
+        await detect_developments(session)
     async with get_session() as session:
         await apply_curated_fixes(session)
     async with get_session() as session:
