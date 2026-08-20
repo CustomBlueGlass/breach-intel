@@ -10,6 +10,7 @@ import { ThreatRadar } from './ticker';
 import { ThreatActorDrawer, actorStixBundle } from './actor';
 import { WorkspaceView } from './workspace';
 import { AboutView } from './about';
+import { MethodologyView } from './methodology';
 import { PricingView } from './pricing';
 import { useAuth } from './lib/auth';
 import { AuthModal, AuthButton, DashboardView } from './account';
@@ -20,6 +21,11 @@ import {
 } from './lib/api';
 
 const PAGE_SIZE = 25;
+
+// Stateless content tabs that get a shareable URL hash (e.g. #methodology), so
+// they can be linked and cited directly. The ledger stays hashless; breach and
+// actor permalinks use their own #breach= / #actor= scheme and are left alone.
+const HASH_TABS = ['about', 'methodology', 'pricing', 'tools', 'analytics'];
 
 // State that should survive reloads (table layout + saved views), backed by
 // localStorage. Falls back to the initial value if storage is unavailable.
@@ -272,9 +278,23 @@ export default function App() {
     const hb = window.location.hash.match(/^#breach=([0-9a-f-]{36})$/i);
     if (hb) { openBreach({ id: hb[1] }); return; }
     const ha = window.location.hash.match(/^#actor=(.+)$/);
-    if (ha) { try { openActor(decodeURIComponent(ha[1])); } catch { /* ignore */ } }
+    if (ha) { try { openActor(decodeURIComponent(ha[1])); } catch { /* ignore */ } return; }
+    const staticTab = window.location.hash.replace(/^#/, '');
+    if (HASH_TABS.includes(staticTab)) setTab(staticTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the URL hash in step with the current content tab, so a static page
+  // (methodology, about, pricing) is shareable and survives a reload. Breach
+  // and actor permalinks own the hash while open, so never clobber those.
+  useEffect(() => {
+    if (/^#(breach|actor)=/.test(window.location.hash)) return;
+    if (HASH_TABS.includes(tab)) {
+      if (window.location.hash !== `#${tab}`) window.history.replaceState(null, '', `#${tab}`);
+    } else if (window.location.hash) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, [tab]);
 
   // Export tool: current filters/sort, capped at 1000 rows.
   function exportLedger(format) {
@@ -413,11 +433,13 @@ export default function App() {
 
       {tab === 'dashboard' && session && <DashboardView onBrowsePlans={() => setTab('pricing')} />}
 
-      {tab === 'about' && <AboutView />}
+      {tab === 'about' && <AboutView onMethodology={() => setTab('methodology')} />}
+
+      {tab === 'methodology' && <MethodologyView onAbout={() => setTab('about')} />}
 
       {tab === 'queue' && <MatchQueueView items={queueItems} />}
 
-      <Footer onAbout={() => setTab('about')} />
+      <Footer onAbout={() => setTab('about')} onMethodology={() => setTab('methodology')} />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
       <CommandPalette
         open={paletteOpen}

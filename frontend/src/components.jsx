@@ -1682,7 +1682,7 @@ export function MatchQueueView({ items }) {
 
 /* --------------------------------- footer ----------------------------------- */
 
-export function Footer({ onAbout }) {
+export function Footer({ onAbout, onMethodology }) {
   const categories = [...new Set(Object.keys(SOURCE_CATEGORY_META))];
   return (
     <footer className="px-6 py-6" style={{ borderTop: `1px solid ${COLORS.line}` }}>
@@ -1702,6 +1702,11 @@ export function Footer({ onAbout }) {
             title="Made in the UK. Aligned with UK GDPR and ICO: we store breach metadata only, never personal data.">
             Made in the UK · UK GDPR / ICO aligned
           </span>
+          {onMethodology && (
+            <button onClick={onMethodology} className="text-xs hover:underline" style={{ fontFamily: FONT_MONO, color: COLORS.boneDim }}>
+              Methodology
+            </button>
+          )}
           {onAbout && (
             <button onClick={onAbout} className="text-xs hover:underline" style={{ fontFamily: FONT_MONO, color: COLORS.boneDim }}>
               About

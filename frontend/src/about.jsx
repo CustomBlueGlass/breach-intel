@@ -79,7 +79,7 @@ function Capability({ title, summary }) {
   );
 }
 
-export function AboutView() {
+export function AboutView({ onMethodology }) {
   return (
     <div className="px-6 py-10 max-w-3xl">
       <div className="flex items-center gap-2 mb-3">
@@ -153,6 +153,14 @@ export function AboutView() {
       >
         Made in the UK · UK GDPR / ICO aligned · breach metadata only, never personal data
       </div>
+
+      {onMethodology && (
+        <div className="mt-8">
+          <button onClick={onMethodology} className="text-sm hover:underline" style={{ fontFamily: FONT_MONO, color: COLORS.amber }}>
+            See exactly how a record is built →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
