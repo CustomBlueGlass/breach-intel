@@ -15,39 +15,79 @@
      since=<date>  only breaches disclosed on/after YYYY-MM-DD
 
    The response is a single STIX bundle. A TAXII 2.1 collection wrapper can sit
-   in front of this later; a plain bundle already imports into every major TIP. */
+   in front of this later; a plain bundle already imports into every major TIP.
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+   The pure helpers (parseParams, buildLedgerQuery, buildBundle) are exported so
+   they can be unit-tested without a live Supabase call. Config is read at call
+   time, not at import, so tests can exercise the missing-config path. */
+
+export const LIMIT_DEFAULT = 500;
+export const LIMIT_MAX = 2000;
+export const FILTER_MAX_LEN = 120;
+
+const SELECT_COLS =
+  "id,canonical_name,industry,country,region_state,ransomware_group," +
+  "incident_date,disclosed_date,records_affected_est,severity,source_count,data_flags";
 
 const uuid = () =>
   (globalThis.crypto && globalThis.crypto.randomUUID)
     ? globalThis.crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-// PostgREST query against the public ledger view, mirroring the site's filters.
-async function fetchLedger({ limit, group, industry, since }) {
+// Config comes from the same public anon key the browser uses. Read at call
+// time so a missing-config deployment returns a clear 500 (and is testable).
+// The service-role key is never referenced here: this endpoint is read-only.
+export function readConfig() {
+  return {
+    url: process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "",
+    key: process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "",
+  };
+}
+
+// Strip characters PostgREST treats as logic (comma, parens, star) so a filter
+// value can never break out of its single-column ilike/eq into extra filters,
+// and bound the length so a filter cannot be abused to enlarge the query.
+export function sanitizeFilter(v) {
+  return String(v).replace(/[,()*]/g, " ").trim().slice(0, FILTER_MAX_LEN);
+}
+
+// Validate + clamp the query into a safe, bounded shape.
+export function parseParams(q = {}) {
+  const rawLimit = parseInt(q.limit, 10);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(rawLimit, 1), LIMIT_MAX)
+    : LIMIT_DEFAULT;
+  const group = typeof q.group === "string" && q.group.trim() ? sanitizeFilter(q.group) : "";
+  const industry =
+    typeof q.industry === "string" && q.industry.trim() ? sanitizeFilter(q.industry) : "";
+  const since =
+    typeof q.since === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q.since) ? q.since : "";
+  return { limit, group, industry, since };
+}
+
+// Build the PostgREST query string for the public ledger view. URLSearchParams
+// percent-encodes every value, which is the second layer of injection defence.
+export function buildLedgerQuery({ limit, group, industry, since }) {
   const params = new URLSearchParams();
-  params.set(
-    "select",
-    "id,canonical_name,industry,country,region_state,ransomware_group," +
-      "incident_date,disclosed_date,records_affected_est,severity,source_count,data_flags"
-  );
+  params.set("select", SELECT_COLS);
   params.set("order", "disclosed_date.desc.nullslast");
   params.set("limit", String(limit));
   if (group) params.append("ransomware_group", `ilike.${group}`);
   if (industry) params.append("industry", `eq.${industry}`);
   if (since) params.append("disclosed_date", `gte.${since}`);
+  return params;
+}
 
-  const url = `${SUPABASE_URL}/rest/v1/mv_breach_ledger?${params.toString()}`;
+async function fetchLedger(params, config) {
+  const url = `${config.url}/rest/v1/mv_breach_ledger?${buildLedgerQuery(params).toString()}`;
   const r = await fetch(url, {
-    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`, Accept: "application/json" },
+    headers: { apikey: config.key, Authorization: `Bearer ${config.key}`, Accept: "application/json" },
   });
   if (!r.ok) throw new Error(`ledger query failed: ${r.status}`);
   return r.json();
 }
 
-function buildBundle(rows) {
+export function buildBundle(rows) {
   const now = new Date().toISOString();
   const objects = [];
 
@@ -66,7 +106,7 @@ function buildBundle(rows) {
 
   const actorIds = new Map(); // group(lower) -> intrusion-set id, deduped
 
-  for (const b of rows) {
+  for (const b of rows || []) {
     const identId = `identity--${uuid()}`;
     const descBits = [];
     if (b.records_affected_est != null) descBits.push(`~${b.records_affected_est} records`);
@@ -132,30 +172,29 @@ function buildBundle(rows) {
 }
 
 export default async function handler(req, res) {
-  // CORS + cache so a TIP or TAXII client can pull it directly.
+  // CORS + cache so a TIP or TAXII client can pull it directly. Read-only GET.
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "GET") return res.status(405).json({ error: "method not allowed" });
 
-  if (!SUPABASE_URL || !ANON_KEY) {
+  const config = readConfig();
+  if (!config.url || !config.key) {
     return res.status(500).json({ error: "feed not configured: missing Supabase env vars" });
   }
 
-  const q = req.query || {};
-  const limit = Math.min(Math.max(parseInt(q.limit, 10) || 500, 1), 2000);
-  const group = typeof q.group === "string" ? q.group.trim() : "";
-  const industry = typeof q.industry === "string" ? q.industry.trim() : "";
-  const since = typeof q.since === "string" && /^\d{4}-\d{2}-\d{2}$/.test(q.since) ? q.since : "";
-
+  const params = parseParams(req.query || {});
   try {
-    const rows = await fetchLedger({ limit, group, industry, since });
+    const rows = await fetchLedger(params, config);
     const bundle = buildBundle(rows);
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=1800, s-maxage=1800");
     res.setHeader("Content-Disposition", 'inline; filename="breach-ledger.stix.json"');
     return res.status(200).json(bundle);
   } catch (e) {
-    return res.status(502).json({ error: String((e && e.message) || e) });
+    // Do not reflect the raw upstream error to the client (avoid leaking any
+    // internal detail); log it for the platform, return a generic status.
+    console.error("stix feed upstream error:", (e && e.message) || e);
+    return res.status(502).json({ error: "upstream ledger query failed" });
   }
 }
