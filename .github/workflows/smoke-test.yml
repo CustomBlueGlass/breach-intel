@@ -1,0 +1,39 @@
+name: Smoke test (deployment)
+
+# Verifies a real deployment serves the app and the /api/stix function.
+# Runs automatically when a deployment reports success (Vercel posts a
+# deployment_status event with the URL), and on demand via workflow_dispatch.
+# Public endpoints only, so no secrets are required.
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Base URL to smoke test (e.g. https://preview.vercel.app)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke test deployed app
+    # For deployment_status only run on success; always run for manual dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Resolve target URL
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "url=${{ inputs.url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=${{ github.event.deployment_status.target_url }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run smoke test
+        run: node scripts/smoke-test.mjs "${{ steps.target.outputs.url }}"
