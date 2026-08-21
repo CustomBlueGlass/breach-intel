@@ -14,6 +14,7 @@ import {
   INDUSTRY_LABELS, SOURCE_CATEGORY_META, SEVERITY_META, ATTACK_NAMES,
   fmtNumber, fmtDate, fmtDateTime, relativeTime, safeUrl,
 } from './constants';
+import { useAuth } from './lib/auth';
 
 /* ------------------------- small shared atoms ------------------------- */
 
@@ -403,6 +404,7 @@ export function DateReviewPill({ compact = false }) {
 // which returns breach NAMES and match COUNTS only, never credential data.
 // Dormant until a lookup key is set on the deployment; degrades gracefully.
 export function CredentialExposure({ breach }) {
+  const { session } = useAuth();
   const [domain, setDomain] = useState(breach.domain || '');
   const [st, setSt] = useState({ status: 'idle' });
 
@@ -413,10 +415,14 @@ export function CredentialExposure({ breach }) {
     if (!d) { setSt({ status: 'error', msg: 'Enter a domain first.' }); return; }
     setSt({ status: 'loading' });
     try {
-      const r = await fetch(`/api/exposure?domain=${encodeURIComponent(d)}`);
+      // The lookup consumes paid provider quotas, so the server requires a valid
+      // session; pass the access token when signed in.
+      const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+      const r = await fetch(`/api/exposure?domain=${encodeURIComponent(d)}`, { headers });
       if (r.status === 404) { setSt({ status: 'error', msg: 'Exposure lookup is not available on this host.' }); return; }
       const data = await r.json().catch(() => ({}));
       if (data.configured === false) { setSt({ status: 'unconfigured' }); return; }
+      if (r.status === 401 || data.authRequired) { setSt({ status: 'auth' }); return; }
       if (data.error) { setSt({ status: 'error', msg: data.error }); return; }
       setSt({ status: 'done', data });
     } catch {
@@ -455,6 +461,11 @@ export function CredentialExposure({ breach }) {
       {st.status === 'unconfigured' && (
         <div className="mt-3 text-xs rounded px-3 py-2" style={{ border: `1px solid rgba(217,142,51,0.35)`, backgroundColor: 'rgba(217,142,51,0.10)', color: COLORS.boneDim, fontFamily: FONT_BODY }}>
           Exposure lookups are not enabled. Add <span style={{ fontFamily: FONT_MONO, color: COLORS.amber }}>BREACHDIRECTORY_API_KEY</span> or <span style={{ fontFamily: FONT_MONO, color: COLORS.amber }}>DEHASHED_API_KEY</span> in the deployment environment to turn this on.
+        </div>
+      )}
+      {st.status === 'auth' && (
+        <div className="mt-3 text-xs rounded px-3 py-2" style={{ border: `1px solid ${COLORS.line}`, backgroundColor: COLORS.panelAlt, color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+          Sign in to run a credential-exposure check. This lookup draws on a paid provider, so it is available to signed-in users.
         </div>
       )}
       {st.status === 'error' && (

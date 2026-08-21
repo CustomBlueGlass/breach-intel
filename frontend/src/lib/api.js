@@ -110,8 +110,8 @@ function buildProvenance(breach, sources) {
   const rows = sources || [];
   const clean = (v) => (v === null || v === undefined || v === '' ? null : v);
   const meta = (s) => ({
-    name: s.breach_data_sources?.name || 'source',
-    category: s.breach_data_sources?.category || null,
+    name: s.source_name || 'source',
+    category: s.source_category || null,
     url: s.source_record_url || null,
     published_at: s.source_published_at || null,
   });
@@ -168,13 +168,16 @@ function buildProvenance(breach, sources) {
 export async function fetchBreachDetail(id) {
   const [{ data: breach, error: breachErr }, { data: sources, error: sourcesErr }] = await Promise.all([
     supabase.from('breaches').select('*').eq('id', id).single(),
+    // Curated public view: exposes only the fields the dossier needs plus two
+    // distilled evidence URLs. The raw source payload, fingerprints and internal
+    // identifiers stay private (see docs/security/public-data-contract.md).
     supabase
-      .from('breach_source_records')
+      .from('v_public_breach_sources')
       .select(
-        'id, source_record_url, document_type, summary, source_published_at, match_confidence, ' +
+        'source_record_url, document_type, summary, source_published_at, match_confidence, ' +
         'records_affected_est, data_types_exposed, ransomware_group_norm, ransomware_group_raw, ' +
         'incident_date, industry, region_state, country, ' +
-        'raw_payload, breach_data_sources ( name, category )'
+        'source_name, source_category, disclosure_url, screenshot_url'
       )
       .eq('matched_breach_id', id)
       .order('source_published_at', { ascending: false }),
@@ -187,17 +190,15 @@ export async function fetchBreachDetail(id) {
   // raw_payload so it can be surfaced as evidence without new columns.
   const evidence = [];
   for (const s of sources || []) {
-    const p = s.raw_payload || {};
-    const disc = p.DisclosureUrl || p.disclosure_url;
-    if (disc) evidence.push({ kind: 'disclosure', url: disc, source: s.breach_data_sources?.name });
-    let shot = p.screenshot || p.screen || p.image;
+    if (s.disclosure_url) evidence.push({ kind: 'disclosure', url: s.disclosure_url, source: s.source_name });
+    let shot = s.screenshot_url;
     // Older ransomware.live rows stored a path relative to the image host.
     if (shot && !/^https?:\/\//.test(shot)) {
       shot = `https://images.ransomware.live/${String(shot).replace(/^\/+/, '')}`;
     }
     if (shot) {
       evidence.push({
-        kind: 'screenshot', url: shot, source: s.breach_data_sources?.name,
+        kind: 'screenshot', url: shot, source: s.source_name,
         post: s.source_record_url,
       });
     }
@@ -210,7 +211,7 @@ export async function fetchBreachDetail(id) {
   let related_news = [];
   try {
     const { data: news } = await supabase
-      .from('news_watch')
+      .from('v_public_news')
       .select('title, url, source_name, published_at, similarity')
       .eq('matched_breach_id', id)
       .order('published_at', { ascending: false, nullsFirst: false })
@@ -283,8 +284,8 @@ export async function fetchBreachDetail(id) {
     provenance: breach ? buildProvenance(breach, sources) : [],
     related,
     linked_sources: (sources || []).map((s) => ({
-      source_name: s.breach_data_sources?.name,
-      source_category: s.breach_data_sources?.category,
+      source_name: s.source_name,
+      source_category: s.source_category,
       document_type: s.document_type,
       published_at: s.source_published_at,
       confidence: s.match_confidence,
@@ -322,7 +323,7 @@ export async function fetchActorProfile(group) {
       .order('disclosed_date', { ascending: false, nullsFirst: false })
       .limit(500),
     supabase
-      .from('breach_source_records')
+      .from('v_public_breach_sources')
       .select('ransomware_group_raw')
       .ilike('ransomware_group_norm', group)
       .not('ransomware_group_raw', 'is', null)
@@ -362,22 +363,10 @@ export async function fetchTopGroups(limit = 8) {
   return data.map((r) => ({ group: r.ransomware_group, count: r.victim_count }));
 }
 
+// The match queue holds internal correlation review state (candidate matches,
+// reviewer, reasons) and is no longer exposed to the anonymous Data API
+// (WP-002). This resolves to an empty list for the public site; queue review is
+// an internal, authenticated-only concern. Best-effort so a 403 never throws.
 export async function fetchMatchQueue() {
-  const { data, error } = await supabase
-    .from('breach_match_queue')
-    .select(
-      'id, confidence, match_reasons, created_at, ' +
-      'breach_source_records ( company_name_raw ), ' +
-      'breaches ( canonical_name )'
-    )
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data.map((q) => ({
-    id: q.id,
-    record_name: q.breach_source_records?.company_name_raw,
-    candidate_name: q.breaches?.canonical_name,
-    confidence: Math.round(Number(q.confidence) * 100),
-    reasons: q.match_reasons || {},
-  }));
+  return [];
 }
