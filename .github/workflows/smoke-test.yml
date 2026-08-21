@@ -1,0 +1,49 @@
+name: Smoke test (deployment)
+
+# Verifies a real deployment serves the app and the /api/stix function.
+#
+# Production deployments are public, so they are smoke-tested automatically.
+# Preview deployments are protected by Vercel Preview Deployment Protection
+# (anonymous requests get 302 -> SSO); they are only tested when a Vercel
+# "Protection Bypass for Automation" secret is configured, which is sent as a
+# request header (never in the URL, never logged). Without that secret a Preview
+# is skipped rather than failed. Protection is never weakened.
+#
+# The deployment application URL is resolved in scripts/smoke-test.mjs from the
+# deployment_status event's environment_url (target_url is often the Vercel
+# dashboard/inspector URL and is rejected). That logic is unit-tested.
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Base URL to smoke test (e.g. https://preview.vercel.app)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke test deployed app
+    # deployment_status fires for many states; only act on success. Manual runs
+    # always proceed.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run smoke test
+        env:
+          # Present for workflow_dispatch; empty for deployment_status (the
+          # script then resolves the URL from the event payload).
+          SMOKE_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.url || '' }}
+          SMOKE_MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+          # Optional. Set this repo/environment secret to smoke-test protected
+          # Preview deployments. GitHub masks it in logs; the script never prints
+          # it. If unset, protected Previews are skipped, not failed.
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: node scripts/smoke-test.mjs
