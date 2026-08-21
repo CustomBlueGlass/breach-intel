@@ -133,6 +133,7 @@ BEGIN
     REFRESH MATERIALIZED VIEW mv_platform_stats;
 END
 $$ LANGUAGE plpgsql
+SET search_path = pg_catalog, public
 """
 
 GRANT_STATS_VIEW = """
@@ -147,20 +148,29 @@ BEGIN
 END $$
 """
 
-# Tables the public site reads directly (breach detail panel, match queue).
-# The original supabase_grants.sql aborted partway on some databases (grant
-# before create), which left RLS policies and grants missing — the ledger
-# views still worked but the detail panel's base-table queries returned
-# nothing. Re-assert the full read-only setup idempotently on every run.
+# Public-data contract (WP-002). Default private; deliberately public only where
+# the unauthenticated product needs it. See docs/security/public-data-contract.md.
+# Anonymous reads are limited to these genuinely-public product objects; internal
+# and operational tables are made private by ENSURE_PRIVATE below, and the dossier
+# reads source/news data through the curated v_public_* views instead of the raw
+# base tables. This is re-asserted idempotently on every run so the state cannot
+# silently drift back to "everything public".
 PUBLIC_READ_TABLES = [
-    "breaches", "breach_companies", "breach_source_records",
-    "breach_match_queue", "breach_data_sources", "breach_collector_log",
-    "threat_actors", "news_watch", "threat_radar", "breach_enrichment_log",
-    "breach_developments",
+    "breaches", "threat_radar", "breach_developments", "breach_enrichment_log",
 ]
 PUBLIC_READ_VIEWS = [
     "mv_breach_ledger", "mv_breach_trends", "mv_top_ransomware_groups",
-    "mv_source_health", "mv_platform_stats",
+    "mv_platform_stats", "v_public_breach_sources", "v_public_news",
+]
+
+# Internal / operational tables that must NOT be anonymously readable. Source and
+# news data reach the site through curated views; the rest are operational or
+# join-only. Enforced every run (RLS on, public-read policy dropped, grants
+# revoked) so hardening is durable.
+PRIVATE_TABLES = [
+    "breach_source_records", "news_watch", "breach_data_sources",
+    "breach_companies", "breach_collector_log", "breach_match_queue",
+    "threat_actors",
 ]
 
 ENSURE_PUBLIC_READ = """
@@ -209,6 +219,106 @@ END $$
     tables=", ".join(f"'{t}'" for t in PUBLIC_READ_TABLES),
     relations=", ".join(f"'{r}'" for r in PUBLIC_READ_TABLES + PUBLIC_READ_VIEWS),
 )
+
+
+# Curated, read-only projections that front the private base tables for the
+# public dossier. They expose only the columns the site needs (plus two distilled
+# evidence URLs) so the raw source payload, fingerprints and internal identifiers
+# stay private. Created idempotently; guarded on the base tables existing.
+CURATED_VIEWS = """
+DO $$
+BEGIN
+    IF to_regclass('public.breach_source_records') IS NOT NULL
+       AND to_regclass('public.breach_data_sources') IS NOT NULL THEN
+        CREATE OR REPLACE VIEW public.v_public_breach_sources AS
+        SELECT r.matched_breach_id, r.source_record_url, r.document_type, r.summary,
+               r.source_published_at, r.match_confidence, r.records_affected_est,
+               r.data_types_exposed, r.ransomware_group_norm, r.ransomware_group_raw,
+               r.incident_date, r.industry, r.region_state, r.country,
+               s.name AS source_name, s.category AS source_category,
+               COALESCE(r.raw_payload->>'DisclosureUrl', r.raw_payload->>'disclosure_url') AS disclosure_url,
+               COALESCE(r.raw_payload->>'screenshot', r.raw_payload->>'screen', r.raw_payload->>'image') AS screenshot_url
+        FROM public.breach_source_records r
+        LEFT JOIN public.breach_data_sources s ON s.id = r.source_id
+        WHERE r.matched_breach_id IS NOT NULL;
+    END IF;
+    IF to_regclass('public.news_watch') IS NOT NULL THEN
+        CREATE OR REPLACE VIEW public.v_public_news AS
+        SELECT matched_breach_id, title, url, source_name, published_at, similarity
+        FROM public.news_watch WHERE matched_breach_id IS NOT NULL;
+    END IF;
+END $$
+"""
+
+
+# Make internal/operational tables private and keep them private: RLS on, the
+# blanket public-read policy dropped, grants revoked from the API roles. Also
+# removes the operational mv_source_health from the Data API. Idempotent.
+ENSURE_PRIVATE = """
+DO $$
+DECLARE t text;
+BEGIN
+    FOREACH t IN ARRAY ARRAY[{privtables}]
+    LOOP
+        CONTINUE WHEN to_regclass('public.' || t) IS NULL;
+        IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = to_regclass('public.' || t)) THEN
+            EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+        END IF;
+        EXECUTE format('DROP POLICY IF EXISTS "public read" ON %I', t);
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            EXECUTE format('REVOKE ALL ON %I FROM anon', t);
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            EXECUTE format('REVOKE ALL ON %I FROM authenticated', t);
+        END IF;
+    END LOOP;
+    IF to_regclass('public.mv_source_health') IS NOT NULL THEN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            REVOKE ALL ON mv_source_health FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            REVOKE ALL ON mv_source_health FROM authenticated;
+        END IF;
+    END IF;
+END $$
+""".format(privtables=", ".join(f"'{t}'" for t in PRIVATE_TABLES))
+
+
+# Keep administrative functions off the Data API and pin safe search paths.
+# refresh_breach_views is expensive (5x REFRESH) and must not be RPC-callable;
+# rls_auto_enable (dashboard-created, SECURITY DEFINER) must not be anon-callable.
+# The trigger functions get a fixed search_path to clear the adviser warning.
+HARDEN_FUNCTIONS = """
+DO $$
+BEGIN
+    IF to_regprocedure('public.refresh_breach_views()') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.refresh_breach_views() FROM PUBLIC;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            REVOKE ALL ON FUNCTION public.refresh_breach_views() FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            REVOKE ALL ON FUNCTION public.refresh_breach_views() FROM authenticated;
+        END IF;
+        ALTER FUNCTION public.refresh_breach_views() SET search_path = pg_catalog, public;
+    END IF;
+    IF to_regprocedure('public.rls_auto_enable()') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.rls_auto_enable() FROM PUBLIC;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            REVOKE ALL ON FUNCTION public.rls_auto_enable() FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            REVOKE ALL ON FUNCTION public.rls_auto_enable() FROM authenticated;
+        END IF;
+        ALTER FUNCTION public.rls_auto_enable() SET search_path = pg_catalog, public;
+    END IF;
+    IF to_regprocedure('public.set_updated_at()') IS NOT NULL THEN
+        ALTER FUNCTION public.set_updated_at() SET search_path = pg_catalog, public;
+    END IF;
+    IF to_regprocedure('public.breaches_search_vector_trigger()') IS NOT NULL THEN
+        ALTER FUNCTION public.breaches_search_vector_trigger() SET search_path = pg_catalog, public;
+    END IF;
+END $$
+"""
 
 
 async def fix_sources(session) -> None:
@@ -724,8 +834,14 @@ async def ensure_views(session) -> None:
     await session.execute(text(ENSURE_DEVELOPMENTS))
     await session.execute(text(PLATFORM_STATS_VIEW))
     await session.execute(text(REFRESH_FUNCTION))
+    # Create the curated public views before granting them, then apply the
+    # least-privilege contract: grant the public allowlist, revoke everything
+    # else from the API roles, and keep admin functions off the Data API.
+    await session.execute(text(CURATED_VIEWS))
     await session.execute(text(GRANT_STATS_VIEW))
     await session.execute(text(ENSURE_PUBLIC_READ))
+    await session.execute(text(ENSURE_PRIVATE))
+    await session.execute(text(HARDEN_FUNCTIONS))
 
 
 async def backfill_attack_cve(session) -> None:
