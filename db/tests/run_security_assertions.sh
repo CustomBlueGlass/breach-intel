@@ -107,6 +107,7 @@ SQL
 # Apply the migrations under test, in order.
 $PSQL -f "$ROOT/db/migrations/0001_security_hardening.sql" >/dev/null
 $PSQL -f "$ROOT/db/migrations/0002_public_projection_tables.sql" >/dev/null
+$PSQL -f "$ROOT/db/migrations/0003_adviser_cleanup.sql" >/dev/null
 
 # Run the assertions.
 $RUN psql -h "$SOCK" -p 5433 -d postgres -v ON_ERROR_STOP=1 -f "$ROOT/db/tests/security_assertions.sql"

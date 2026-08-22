@@ -228,7 +228,7 @@ test("configured GET returns a 200 STIX bundle (stubbed Supabase)", async () => 
     }
   );
   // Reads the public ledger view via the anon key, never a service-role path.
-  assert.match(requestedUrl, /\/rest\/v1\/mv_breach_ledger\?/);
+  assert.match(requestedUrl, /\/rest\/v1\/public_breach_ledger\?/);
   delete process.env.VITE_SUPABASE_URL;
   delete process.env.VITE_SUPABASE_ANON_KEY;
 });

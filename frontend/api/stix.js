@@ -79,7 +79,7 @@ export function buildLedgerQuery({ limit, group, industry, since }) {
 }
 
 async function fetchLedger(params, config) {
-  const url = `${config.url}/rest/v1/mv_breach_ledger?${buildLedgerQuery(params).toString()}`;
+  const url = `${config.url}/rest/v1/public_breach_ledger?${buildLedgerQuery(params).toString()}`;
   const r = await fetch(url, {
     headers: { apikey: config.key, Authorization: `Bearer ${config.key}`, Accept: "application/json" },
   });

@@ -31,14 +31,19 @@ BEGIN
   EXECUTE format('SELECT 1 FROM public.%I LIMIT 1', rel);  -- raises if denied
 END $$ LANGUAGE plpgsql;
 
--- Helper: assert that INSERT as the current role is DENIED.
+-- Helper: assert that INSERT as the current role is DENIED. Uses DEFAULT VALUES
+-- so it is column-agnostic. The INSERT privilege is checked before any
+-- constraint, so a denied role raises insufficient_privilege; any other error
+-- means the privilege check passed (which is a failure for a public table).
 CREATE OR REPLACE FUNCTION _assert_write_denied(rel text) RETURNS void AS $$
 BEGIN
   BEGIN
-    EXECUTE format('INSERT INTO public.%I (matched_breach_id) VALUES (gen_random_uuid())', rel);
+    EXECUTE format('INSERT INTO public.%I DEFAULT VALUES', rel);
     RAISE EXCEPTION 'SECURITY FAIL: role % can INSERT into public.%', current_user, rel;
   EXCEPTION
-    WHEN insufficient_privilege THEN RETURN;         -- expected
+    WHEN insufficient_privilege THEN RETURN;         -- denied (expected)
+    WHEN others THEN
+      RAISE EXCEPTION 'SECURITY FAIL: INSERT into public.% was not blocked by privilege (%)', rel, SQLERRM;
   END;
 END $$ LANGUAGE plpgsql;
 
@@ -55,15 +60,28 @@ SELECT _assert_denied('threat_actors');
 SELECT _assert_denied('news_watch');
 SELECT _assert_denied('mv_source_health');
 
+-- WP-004: the product matviews are now internal (compute layer) and must be denied.
+SELECT _assert_denied('mv_breach_ledger');
+SELECT _assert_denied('mv_breach_trends');
+SELECT _assert_denied('mv_top_ransomware_groups');
+SELECT _assert_denied('mv_platform_stats');
+
 -- Public product objects must remain readable.
 SELECT _assert_allowed('breaches');
 SELECT _assert_allowed('breach_developments');
 SELECT _assert_allowed('breach_enrichment_log');
 SELECT _assert_allowed('threat_radar');
-SELECT _assert_allowed('mv_breach_ledger');
-SELECT _assert_allowed('mv_breach_trends');
-SELECT _assert_allowed('mv_top_ransomware_groups');
-SELECT _assert_allowed('mv_platform_stats');
+
+-- WP-004: the public ledger/analytics/stats projection tables are the anonymously
+-- readable copies; readable but not writable.
+SELECT _assert_allowed('public_breach_ledger');
+SELECT _assert_allowed('public_breach_trends');
+SELECT _assert_allowed('public_top_ransomware_groups');
+SELECT _assert_allowed('public_platform_stats');
+SELECT _assert_write_denied('public_breach_ledger');
+SELECT _assert_write_denied('public_breach_trends');
+SELECT _assert_write_denied('public_top_ransomware_groups');
+SELECT _assert_write_denied('public_platform_stats');
 
 -- Curated public views must be readable (dossier sources + related news).
 SELECT _assert_allowed('v_public_breach_sources');
@@ -83,6 +101,15 @@ SELECT source_record_url, document_type, summary, source_published_at, match_con
 FROM public.v_public_breach_sources WHERE matched_breach_id = gen_random_uuid() LIMIT 1;
 SELECT title, url, source_name, published_at, similarity
 FROM public.v_public_news WHERE matched_breach_id = gen_random_uuid() LIMIT 1;
+
+-- WP-004: the STIX + analytics + stats query shapes still work as anon.
+SELECT id, canonical_name, industry, country, region_state, ransomware_group,
+       incident_date, disclosed_date, records_affected_est, severity, source_count, data_flags
+FROM public.public_breach_ledger ORDER BY disclosed_date DESC NULLS LAST LIMIT 5;
+SELECT week_start, industry, breach_count FROM public.public_breach_trends ORDER BY week_start LIMIT 1;
+SELECT ransomware_group, victim_count FROM public.public_top_ransomware_groups
+  ORDER BY victim_count DESC LIMIT 1;
+SELECT total_breaches, total_sources, avg_confidence, pending_review FROM public.public_platform_stats LIMIT 1;
 
 -- Neither the curated source view nor the projection table may leak the
 -- sensitive base columns (WP-002 + WP-003).

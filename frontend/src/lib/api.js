@@ -3,14 +3,14 @@ import { supabase } from './supabaseClient';
 const PAGE_SIZE = 25; // spec: 25–50 records per page, never the full dataset
 
 export async function fetchStats() {
-  const { data, error } = await supabase.from('mv_platform_stats').select('*').single();
+  const { data, error } = await supabase.from('public_platform_stats').select('*').single();
   if (error) throw error;
   return data;
 }
 
 export async function fetchRecentIntake(limit = 6) {
   const { data, error } = await supabase
-    .from('mv_breach_ledger')
+    .from('public_breach_ledger')
     .select('id, canonical_name, disclosed_date')
     .order('disclosed_date', { ascending: false })
     .limit(limit);
@@ -20,7 +20,7 @@ export async function fetchRecentIntake(limit = 6) {
 
 export async function fetchRansomwareGroupOptions() {
   const { data, error } = await supabase
-    .from('mv_top_ransomware_groups')
+    .from('public_top_ransomware_groups')
     .select('ransomware_group')
     .order('ransomware_group');
   if (error) throw error;
@@ -61,7 +61,7 @@ function applyLedgerFilters(query, filters) {
 }
 
 export async function fetchBreaches({ filters, sortBy, sortDir, page, pageSize = PAGE_SIZE }) {
-  let query = supabase.from('mv_breach_ledger').select('*', { count: 'exact' });
+  let query = supabase.from('public_breach_ledger').select('*', { count: 'exact' });
   query = applyLedgerFilters(query, filters);
 
   const from = (page - 1) * pageSize;
@@ -78,7 +78,7 @@ export async function fetchBreaches({ filters, sortBy, sortDir, page, pageSize =
 // Export tool: same filters as the on-screen ledger, capped at 1000 rows so
 // a researcher can pull the current view into CSV/JSON for their own tooling.
 export async function fetchBreachesForExport({ filters, sortBy, sortDir, max = 1000 }) {
-  let query = supabase.from('mv_breach_ledger').select('*');
+  let query = supabase.from('public_breach_ledger').select('*');
   query = applyLedgerFilters(query, filters);
   const { data, error } = await query
     .order(sortBy, { ascending: sortDir === 'asc', nullsFirst: false })
@@ -92,7 +92,7 @@ export async function searchLedger(q, limit = 8) {
   if (!q || !q.trim()) return [];
   const term = q.trim().replace(/[,()*]/g, ' ');
   const { data, error } = await supabase
-    .from('mv_breach_ledger')
+    .from('public_breach_ledger')
     .select('id, canonical_name, ransomware_group, industry, disclosed_date, incident_date')
     .or(`canonical_name.ilike.%${term}%,ransomware_group.ilike.%${term}%`)
     .limit(limit);
@@ -261,11 +261,11 @@ export async function fetchBreachDetail(id) {
     try {
       const cols = 'id, canonical_name, disclosed_date, incident_date, industry, ransomware_group, severity';
       const actorQ = breach.ransomware_group
-        ? supabase.from('mv_breach_ledger').select(cols)
+        ? supabase.from('public_breach_ledger').select(cols)
             .ilike('ransomware_group', breach.ransomware_group).neq('id', id)
             .order('disclosed_date', { ascending: false, nullsFirst: false }).limit(6)
         : Promise.resolve({ data: [] });
-      const companyQ = supabase.from('mv_breach_ledger').select(cols)
+      const companyQ = supabase.from('public_breach_ledger').select(cols)
         .ilike('canonical_name', breach.canonical_name).neq('id', id)
         .order('disclosed_date', { ascending: false, nullsFirst: false }).limit(5);
       const [{ data: byActor }, { data: byCompany }] = await Promise.all([actorQ, companyQ]);
@@ -317,7 +317,7 @@ export async function fetchThreatRadar(limit = 40) {
 export async function fetchActorProfile(group) {
   const [{ data: victims, error: vErr }, { data: rawRows }] = await Promise.all([
     supabase
-      .from('mv_breach_ledger')
+      .from('public_breach_ledger')
       .select('id, canonical_name, industry, country, region_state, incident_date, disclosed_date, records_affected_est, severity')
       .ilike('ransomware_group', group)
       .order('disclosed_date', { ascending: false, nullsFirst: false })
@@ -346,7 +346,7 @@ export async function fetchActorProfile(group) {
 
 export async function fetchTrends() {
   const { data, error } = await supabase
-    .from('mv_breach_trends')
+    .from('public_breach_trends')
     .select('week_start, industry, breach_count')
     .order('week_start');
   if (error) throw error;
@@ -355,7 +355,7 @@ export async function fetchTrends() {
 
 export async function fetchTopGroups(limit = 8) {
   const { data, error } = await supabase
-    .from('mv_top_ransomware_groups')
+    .from('public_top_ransomware_groups')
     .select('ransomware_group, victim_count')
     .order('victim_count', { ascending: false })
     .limit(limit);
