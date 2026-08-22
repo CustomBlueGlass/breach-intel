@@ -50,3 +50,35 @@ jobs:
           python-version: "3.12"
       - name: Compile-check the Python sources
         run: python -m compileall -q backend/app
+
+  security:
+    name: Dependency + secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # Runtime frontend dependencies: fail on high/critical advisories. Policy:
+      # high+ blocks; dev-only advisories are out of the deployed surface.
+      - name: npm audit (runtime deps, high+)
+        working-directory: frontend
+        run: npm ci --ignore-scripts && npm audit --omit=dev --audit-level=high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Python dependencies (collectors + maintenance). Fails on any known vuln;
+      # accepted exceptions, if ever needed, are recorded in
+      # docs/security/dependency-policy.md and passed via --ignore-vuln.
+      - name: pip-audit (backend requirements)
+        run: |
+          python -m pip install --quiet pip-audit
+          pip-audit -r backend/requirements.txt
+      # Secret scan of the working tree AND git history. --redact ensures no
+      # secret value is ever printed to the log; a finding fails the job.
+      - name: Secret scan (gitleaks)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.18.4 \
+            detect --source=/repo --redact -v --exit-code=1
