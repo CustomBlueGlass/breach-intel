@@ -31,6 +31,17 @@ BEGIN
   EXECUTE format('SELECT 1 FROM public.%I LIMIT 1', rel);  -- raises if denied
 END $$ LANGUAGE plpgsql;
 
+-- Helper: assert that INSERT as the current role is DENIED.
+CREATE OR REPLACE FUNCTION _assert_write_denied(rel text) RETURNS void AS $$
+BEGIN
+  BEGIN
+    EXECUTE format('INSERT INTO public.%I (matched_breach_id) VALUES (gen_random_uuid())', rel);
+    RAISE EXCEPTION 'SECURITY FAIL: role % can INSERT into public.%', current_user, rel;
+  EXCEPTION
+    WHEN insufficient_privilege THEN RETURN;         -- expected
+  END;
+END $$ LANGUAGE plpgsql;
+
 -- ---- as the anonymous API role -------------------------------------------
 SET ROLE anon;
 
@@ -58,17 +69,52 @@ SELECT _assert_allowed('mv_platform_stats');
 SELECT _assert_allowed('v_public_breach_sources');
 SELECT _assert_allowed('v_public_news');
 
--- The curated source view must NOT leak the sensitive base columns.
+-- WP-003: the public projection TABLES are readable but not writable by anon.
+SELECT _assert_allowed('public_breach_sources');
+SELECT _assert_allowed('public_breach_news');
+SELECT _assert_write_denied('public_breach_sources');
+SELECT _assert_write_denied('public_breach_news');
+
+-- The exact dossier source query shape (columns the frontend selects) still works.
+SELECT source_record_url, document_type, summary, source_published_at, match_confidence,
+       records_affected_est, data_types_exposed, ransomware_group_norm, ransomware_group_raw,
+       incident_date, industry, region_state, country, source_name, source_category,
+       disclosure_url, screenshot_url
+FROM public.v_public_breach_sources WHERE matched_breach_id = gen_random_uuid() LIMIT 1;
+SELECT title, url, source_name, published_at, similarity
+FROM public.v_public_news WHERE matched_breach_id = gen_random_uuid() LIMIT 1;
+
+-- Neither the curated source view nor the projection table may leak the
+-- sensitive base columns (WP-002 + WP-003).
 DO $$
+DECLARE rel text;
 BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema='public' AND table_name='v_public_breach_sources'
-      AND column_name IN ('raw_payload','content_fingerprint','source_id','external_id',
-                          'company_name_raw','company_name_norm')
-  ) THEN
-    RAISE EXCEPTION 'SECURITY FAIL: v_public_breach_sources exposes a sensitive column';
-  END IF;
+  FOREACH rel IN ARRAY ARRAY['v_public_breach_sources','public_breach_sources'] LOOP
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema='public' AND table_name=rel
+        AND column_name IN ('raw_payload','content_fingerprint','source_id','external_id',
+                            'company_name_raw','company_name_norm','fetched_at')
+    ) THEN
+      RAISE EXCEPTION 'SECURITY FAIL: % exposes a sensitive column', rel;
+    END IF;
+  END LOOP;
+END $$;
+
+-- WP-003: the application-facing views must be security_invoker (not definer),
+-- so they do not bypass RLS and clear the "Security Definer View" adviser finding.
+DO $$
+DECLARE rel text;
+BEGIN
+  FOREACH rel IN ARRAY ARRAY['v_public_breach_sources','v_public_news'] LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_class
+      WHERE relname = rel AND relnamespace = 'public'::regnamespace
+        AND reloptions @> ARRAY['security_invoker=true']
+    ) THEN
+      RAISE EXCEPTION 'SECURITY FAIL: % is not a security_invoker view', rel;
+    END IF;
+  END LOOP;
 END $$;
 
 -- Administrative functions must not be executable by anon.

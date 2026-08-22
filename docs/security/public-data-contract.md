@@ -23,14 +23,27 @@ Traced from the only two anonymous consumers: the frontend queries in
 | `breach_developments` | table | yes | dossier "developments" (fines, suits) | product columns; `dedupe_key` is a non-sensitive hash |
 | `breach_enrichment_log` | table | yes | dossier "enhancement history" | `changed` (diff of public fields), `enriched_at` |
 | `threat_radar` | table | yes | live ticker | product columns |
-| `v_public_breach_sources` | view | yes | dossier source list + provenance/conflict + evidence | curated allowlist (see below) |
-| `v_public_news` | view | yes | dossier "related news" | matched_breach_id, title, url, source_name, published_at, similarity |
+| `public_breach_sources` | table | yes | curated public projection (dossier sources) | curated allowlist (see below) |
+| `public_breach_news` | table | yes | curated public projection (related news) | matched_breach_id, title, url, source_name, published_at, similarity |
+| `v_public_breach_sources` | view | yes | app-facing name; `security_invoker` view over `public_breach_sources` | same columns as the projection |
+| `v_public_news` | view | yes | app-facing name; `security_invoker` view over `public_breach_news` | same columns as the projection |
 
-`v_public_breach_sources` deliberately omits `raw_payload`, `content_fingerprint`,
+**WP-003 architecture.** The trust boundary is a pair of deliberately-public
+projection TABLES (`public_breach_sources`, `public_breach_news`) that hold a
+sanitised copy of the publishable state, populated only by owner-side maintenance
+(`refresh_public_projections`). The application-facing names remain as
+`security_invoker` views over those tables, so no view ever queries a private
+table and the "Security Definer View" adviser findings are cleared. anon has
+SELECT only on the projection tables (RLS SELECT policy, INSERT/UPDATE/DELETE
+revoked).
+
+`public_breach_sources` deliberately omits `raw_payload`, `content_fingerprint`,
 `source_id`, `external_id`, `company_name_raw`, `company_name_norm`, `fetched_at`,
 `created_at`. It exposes only the reported fields the dossier renders plus two
 distilled evidence URLs (`disclosure_url`, `screenshot_url`) extracted from
-`raw_payload`, so the raw source payload never reaches the browser.
+`raw_payload` **during the trusted refresh**, so the raw source payload is never
+granted to the public layer. Stale/deleted upstream rows drop out because each
+refresh is a full transactional replace (DELETE + INSERT in one transaction).
 
 ## Private (no anon access)
 
@@ -60,10 +73,11 @@ distilled evidence URLs (`disclosure_url`, `screenshot_url`) extracted from
   `mv_top_ransomware_groups`, `mv_platform_stats`): intentionally public. They
   contain only already-public, aggregate product data and are the customer-facing
   ledger/analytics. `mv_source_health` (operational) was removed from the API.
-- **Curated views run with owner privileges** (`v_public_breach_sources`,
-  `v_public_news`): this is required for column curation. anon has no access to the
-  private base tables; the views expose only the reviewed allowlist above and are
-  read-only. This is the intended use of a curated projection.
+- **Curated public projection** (`public_breach_sources`, `public_breach_news` +
+  their `security_invoker` views): replaces the earlier owner-privileged
+  ("security definer") views. No view queries a private table; the projection
+  tables are a sanitised public copy refreshed by owner-side maintenance. This
+  clears the two "Security Definer View" adviser ERRORs (WP-003).
 - **Extensions in `public`** (`pg_trgm`, `btree_gin`): left in place. Moving them
   risks breaking the trigram GIN indexes the correlation/search paths depend on.
   Low severity; tracked as deferred in the PR "Remaining risks".
