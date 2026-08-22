@@ -157,6 +157,9 @@ END $$
 # silently drift back to "everything public".
 PUBLIC_READ_TABLES = [
     "breaches", "threat_radar", "breach_developments", "breach_enrichment_log",
+    # WP-003 curated public projection tables (sanitised copies; the app-facing
+    # v_public_* views are security_invoker views over these).
+    "public_breach_sources", "public_breach_news",
 ]
 PUBLIC_READ_VIEWS = [
     "mv_breach_ledger", "mv_breach_trends", "mv_top_ransomware_groups",
@@ -221,34 +224,134 @@ END $$
 )
 
 
-# Curated, read-only projections that front the private base tables for the
-# public dossier. They expose only the columns the site needs (plus two distilled
-# evidence URLs) so the raw source payload, fingerprints and internal identifiers
-# stay private. Created idempotently; guarded on the base tables existing.
-CURATED_VIEWS = """
+# WP-003 public projection tables. The trust boundary is a deliberately-public,
+# sanitised COPY of the source/news data, populated by this owner-side code. The
+# application-facing names (v_public_breach_sources, v_public_news) stay, but as
+# security_invoker views over the public projection tables, so they never bypass
+# RLS on a private table and clear the "Security Definer View" adviser finding.
+# Schema + views only here (idempotent); data is loaded by refresh_public_projections.
+ENSURE_PROJECTIONS = """
 DO $$
 BEGIN
-    IF to_regclass('public.breach_source_records') IS NOT NULL
-       AND to_regclass('public.breach_data_sources') IS NOT NULL THEN
-        CREATE OR REPLACE VIEW public.v_public_breach_sources AS
-        SELECT r.matched_breach_id, r.source_record_url, r.document_type, r.summary,
-               r.source_published_at, r.match_confidence, r.records_affected_est,
-               r.data_types_exposed, r.ransomware_group_norm, r.ransomware_group_raw,
-               r.incident_date, r.industry, r.region_state, r.country,
-               s.name AS source_name, s.category AS source_category,
-               COALESCE(r.raw_payload->>'DisclosureUrl', r.raw_payload->>'disclosure_url') AS disclosure_url,
-               COALESCE(r.raw_payload->>'screenshot', r.raw_payload->>'screen', r.raw_payload->>'image') AS screenshot_url
-        FROM public.breach_source_records r
-        LEFT JOIN public.breach_data_sources s ON s.id = r.source_id
-        WHERE r.matched_breach_id IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS public.public_breach_sources (
+        id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        matched_breach_id    uuid NOT NULL,
+        source_record_url    text,
+        document_type        text,
+        summary              text,
+        source_published_at  timestamptz,
+        match_confidence     numeric(4,3),
+        records_affected_est bigint,
+        data_types_exposed   text[],
+        ransomware_group_norm text,
+        ransomware_group_raw  text,
+        incident_date        date,
+        industry             text,
+        region_state         text,
+        country              text,
+        source_name          text,
+        source_category      text,
+        disclosure_url       text,
+        screenshot_url       text
+    );
+    CREATE INDEX IF NOT EXISTS idx_public_sources_breach ON public.public_breach_sources (matched_breach_id);
+    CREATE TABLE IF NOT EXISTS public.public_breach_news (
+        id                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        matched_breach_id uuid NOT NULL,
+        title             text,
+        url               text,
+        source_name       text,
+        published_at      timestamptz,
+        similarity        numeric(4,3)
+    );
+    CREATE INDEX IF NOT EXISTS idx_public_news_breach ON public.public_breach_news (matched_breach_id);
+
+    ALTER TABLE public.public_breach_sources ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.public_breach_news    ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "public read" ON public.public_breach_sources;
+    CREATE POLICY "public read" ON public.public_breach_sources FOR SELECT USING (true);
+    DROP POLICY IF EXISTS "public read" ON public.public_breach_news;
+    CREATE POLICY "public read" ON public.public_breach_news FOR SELECT USING (true);
+
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN
+        REVOKE INSERT, UPDATE, DELETE ON public.public_breach_sources FROM anon;
+        REVOKE INSERT, UPDATE, DELETE ON public.public_breach_news FROM anon;
     END IF;
-    IF to_regclass('public.news_watch') IS NOT NULL THEN
-        CREATE OR REPLACE VIEW public.v_public_news AS
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN
+        REVOKE INSERT, UPDATE, DELETE ON public.public_breach_sources FROM authenticated;
+        REVOKE INSERT, UPDATE, DELETE ON public.public_breach_news FROM authenticated;
+    END IF;
+
+    DROP VIEW IF EXISTS public.v_public_breach_sources;
+    CREATE VIEW public.v_public_breach_sources WITH (security_invoker = true) AS
+        SELECT matched_breach_id, source_record_url, document_type, summary, source_published_at,
+               match_confidence, records_affected_est, data_types_exposed, ransomware_group_norm,
+               ransomware_group_raw, incident_date, industry, region_state, country,
+               source_name, source_category, disclosure_url, screenshot_url
+        FROM public.public_breach_sources;
+    DROP VIEW IF EXISTS public.v_public_news;
+    CREATE VIEW public.v_public_news WITH (security_invoker = true) AS
         SELECT matched_breach_id, title, url, source_name, published_at, similarity
-        FROM public.news_watch WHERE matched_breach_id IS NOT NULL;
-    END IF;
+        FROM public.public_breach_news;
 END $$
 """
+
+
+# Owner-side refresh of the public projections: a full transactional replace from
+# the private source/news tables, so it is deterministic, idempotent and prunes
+# rows that no longer exist upstream. The two evidence URLs are distilled from
+# raw_payload here (never exposed to the public layer). Run in its own session
+# (transaction) so external readers see an atomic swap, never an empty table.
+REFRESH_SOURCES_INSERT = """
+INSERT INTO public.public_breach_sources
+    (matched_breach_id, source_record_url, document_type, summary, source_published_at,
+     match_confidence, records_affected_est, data_types_exposed, ransomware_group_norm,
+     ransomware_group_raw, incident_date, industry, region_state, country,
+     source_name, source_category, disclosure_url, screenshot_url)
+SELECT r.matched_breach_id, r.source_record_url, r.document_type, r.summary, r.source_published_at,
+       r.match_confidence, r.records_affected_est, r.data_types_exposed, r.ransomware_group_norm,
+       r.ransomware_group_raw, r.incident_date, r.industry, r.region_state, r.country,
+       s.name, s.category,
+       COALESCE(r.raw_payload->>'DisclosureUrl', r.raw_payload->>'disclosure_url'),
+       COALESCE(r.raw_payload->>'screenshot', r.raw_payload->>'screen', r.raw_payload->>'image')
+FROM public.breach_source_records r
+LEFT JOIN public.breach_data_sources s ON s.id = r.source_id
+WHERE r.matched_breach_id IS NOT NULL
+"""
+
+REFRESH_NEWS_INSERT = """
+INSERT INTO public.public_breach_news
+    (matched_breach_id, title, url, source_name, published_at, similarity)
+SELECT matched_breach_id, title, url, source_name, published_at, similarity
+FROM public.news_watch
+WHERE matched_breach_id IS NOT NULL
+"""
+
+
+async def refresh_public_projections(session) -> None:
+    """Reload the public projection tables from the private source/news tables.
+    Full replace inside one transaction = atomic swap for readers. Removed/edited
+    upstream rows are reflected because the projection is rebuilt from scratch."""
+    if (await session.execute(
+        text("SELECT to_regclass('public.public_breach_sources') IS NOT NULL")
+    )).scalar() and (await session.execute(
+        text("SELECT to_regclass('public.breach_source_records') IS NOT NULL")
+    )).scalar():
+        await session.execute(text("DELETE FROM public.public_breach_sources"))
+        await session.execute(text(REFRESH_SOURCES_INSERT))
+        n = (await session.execute(text("SELECT count(*) FROM public.public_breach_sources"))).scalar()
+        logger.info("Refreshed public_breach_sources projection: %s row(s)", n)
+
+    has_news = (await session.execute(
+        text("SELECT to_regclass('public.news_watch') IS NOT NULL")
+    )).scalar()
+    if has_news and (await session.execute(
+        text("SELECT to_regclass('public.public_breach_news') IS NOT NULL")
+    )).scalar():
+        await session.execute(text("DELETE FROM public.public_breach_news"))
+        await session.execute(text(REFRESH_NEWS_INSERT))
+        n = (await session.execute(text("SELECT count(*) FROM public.public_breach_news"))).scalar()
+        logger.info("Refreshed public_breach_news projection: %s row(s)", n)
 
 
 # Make internal/operational tables private and keep them private: RLS on, the
@@ -834,10 +937,11 @@ async def ensure_views(session) -> None:
     await session.execute(text(ENSURE_DEVELOPMENTS))
     await session.execute(text(PLATFORM_STATS_VIEW))
     await session.execute(text(REFRESH_FUNCTION))
-    # Create the curated public views before granting them, then apply the
-    # least-privilege contract: grant the public allowlist, revoke everything
-    # else from the API roles, and keep admin functions off the Data API.
-    await session.execute(text(CURATED_VIEWS))
+    # Create the public projection tables + security_invoker views before
+    # granting them, then apply the least-privilege contract: grant the public
+    # allowlist, revoke everything else from the API roles, and keep admin
+    # functions off the Data API.
+    await session.execute(text(ENSURE_PROJECTIONS))
     await session.execute(text(GRANT_STATS_VIEW))
     await session.execute(text(ENSURE_PUBLIC_READ))
     await session.execute(text(ENSURE_PRIVATE))
@@ -1185,6 +1289,10 @@ async def run_maintenance() -> None:
         await apply_curated_fixes(session)
     async with get_session() as session:
         await flag_implausible_dates(session)
+    # Rebuild the public projection tables from the (now settled) private source
+    # and news data, in their own transaction for an atomic swap.
+    async with get_session() as session:
+        await refresh_public_projections(session)
     async with get_session() as session:
         await session.execute(text("SELECT refresh_breach_views()"))
     logger.info("Maintenance pass complete.")
