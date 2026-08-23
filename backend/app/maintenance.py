@@ -136,34 +136,33 @@ $$ LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 """
 
-GRANT_STATS_VIEW = """
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-        GRANT SELECT ON mv_platform_stats TO anon;
-    END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-        GRANT SELECT ON mv_platform_stats TO authenticated;
-    END IF;
-END $$
-"""
-
-# Public-data contract (WP-002). Default private; deliberately public only where
-# the unauthenticated product needs it. See docs/security/public-data-contract.md.
+# Public-data contract (WP-002/003/004). Default private; deliberately public only
+# where the unauthenticated product needs it. See docs/security/public-data-contract.md.
 # Anonymous reads are limited to these genuinely-public product objects; internal
-# and operational tables are made private by ENSURE_PRIVATE below, and the dossier
-# reads source/news data through the curated v_public_* views instead of the raw
-# base tables. This is re-asserted idempotently on every run so the state cannot
+# and operational tables/matviews are made private by ENSURE_PRIVATE below, and the
+# dossier/analytics read sanitised public projection tables instead of the raw base
+# tables or the matviews. Re-asserted idempotently every run so the state cannot
 # silently drift back to "everything public".
 PUBLIC_READ_TABLES = [
     "breaches", "threat_radar", "breach_developments", "breach_enrichment_log",
     # WP-003 curated public projection tables (sanitised copies; the app-facing
     # v_public_* views are security_invoker views over these).
     "public_breach_sources", "public_breach_news",
+    # WP-004 public projection tables for the ledger/analytics/stats (the matviews
+    # stay internal; these are the only anonymously-readable copies).
+    "public_breach_ledger", "public_breach_trends",
+    "public_top_ransomware_groups", "public_platform_stats",
 ]
 PUBLIC_READ_VIEWS = [
+    "v_public_breach_sources", "v_public_news",
+]
+
+# Internal materialized views: the compute layer, never on the Data API. anon and
+# authenticated reads are revoked (WP-004); the public copies are the projection
+# tables above.
+PRIVATE_MVIEWS = [
     "mv_breach_ledger", "mv_breach_trends", "mv_top_ransomware_groups",
-    "mv_platform_stats", "v_public_breach_sources", "v_public_news",
+    "mv_platform_stats", "mv_source_health",
 ]
 
 # Internal / operational tables that must NOT be anonymously readable. Source and
@@ -354,6 +353,78 @@ async def refresh_public_projections(session) -> None:
         logger.info("Refreshed public_breach_news projection: %s row(s)", n)
 
 
+# WP-004 public projection tables for the ledger / analytics / stats. The four
+# matviews stay internal (the compute layer); these tables are the only
+# anonymously-readable copies. Schema + RLS only here; data via refresh below.
+ENSURE_PUBLIC_MV_TABLES = """
+DO $$
+BEGIN
+    CREATE TABLE IF NOT EXISTS public.public_breach_ledger (
+        id uuid PRIMARY KEY, canonical_name text, domain text, industry text,
+        country text, region_state text, ransomware_group text, incident_date date,
+        disclosed_date date, records_affected_est bigint, severity text, status text,
+        source_count integer, confidence_avg numeric(4,3), data_flags text[], last_updated_at timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS idx_pub_ledger_incident  ON public.public_breach_ledger (incident_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_pub_ledger_disclosed ON public.public_breach_ledger (disclosed_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_pub_ledger_industry  ON public.public_breach_ledger (industry);
+    CREATE INDEX IF NOT EXISTS idx_pub_ledger_group     ON public.public_breach_ledger (ransomware_group);
+
+    CREATE TABLE IF NOT EXISTS public.public_breach_trends (
+        week_start date, industry text, breach_count bigint, records_affected_sum numeric
+    );
+    CREATE INDEX IF NOT EXISTS idx_pub_trends_week ON public.public_breach_trends (week_start);
+
+    CREATE TABLE IF NOT EXISTS public.public_top_ransomware_groups (
+        ransomware_group text, victim_count bigint, most_recent_incident date
+    );
+
+    CREATE TABLE IF NOT EXISTS public.public_platform_stats (
+        total_breaches bigint, total_sources bigint, avg_confidence numeric,
+        pending_review bigint, computed_at timestamptz
+    );
+
+    -- RLS + no client writes (SELECT grants come from ENSURE_PUBLIC_READ).
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN
+        REVOKE INSERT, UPDATE, DELETE ON public.public_breach_ledger, public.public_breach_trends,
+            public.public_top_ransomware_groups, public.public_platform_stats FROM anon;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN
+        REVOKE INSERT, UPDATE, DELETE ON public.public_breach_ledger, public.public_breach_trends,
+            public.public_top_ransomware_groups, public.public_platform_stats FROM authenticated;
+    END IF;
+END $$
+"""
+
+
+async def refresh_public_mv_tables(session) -> None:
+    """Rebuild the public ledger/analytics/stats projection tables from the (just
+    refreshed) matviews. Full transactional replace per table = deterministic,
+    idempotent, prunes removed rows, atomic swap for readers. Run AFTER
+    refresh_breach_views() so the matviews are current."""
+    plan = [
+        ("public_breach_ledger", "mv_breach_ledger",
+         "id, canonical_name, domain, industry, country, region_state, ransomware_group, "
+         "incident_date, disclosed_date, records_affected_est, severity, status, "
+         "source_count, confidence_avg, data_flags, last_updated_at"),
+        ("public_breach_trends", "mv_breach_trends",
+         "week_start, industry, breach_count, records_affected_sum"),
+        ("public_top_ransomware_groups", "mv_top_ransomware_groups",
+         "ransomware_group, victim_count, most_recent_incident"),
+        ("public_platform_stats", "mv_platform_stats",
+         "total_breaches, total_sources, avg_confidence, pending_review, computed_at"),
+    ]
+    for tbl, mv, cols in plan:
+        exists = (await session.execute(
+            text(f"SELECT to_regclass('public.{tbl}') IS NOT NULL AND to_regclass('public.{mv}') IS NOT NULL")
+        )).scalar()
+        if not exists:
+            continue
+        await session.execute(text(f"DELETE FROM public.{tbl}"))
+        await session.execute(text(f"INSERT INTO public.{tbl} ({cols}) SELECT {cols} FROM public.{mv}"))
+    logger.info("Refreshed public ledger/analytics/stats projection tables")
+
+
 # Make internal/operational tables private and keep them private: RLS on, the
 # blanket public-read policy dropped, grants revoked from the API roles. Also
 # removes the operational mv_source_health from the Data API. Idempotent.
@@ -375,16 +446,22 @@ BEGIN
             EXECUTE format('REVOKE ALL ON %I FROM authenticated', t);
         END IF;
     END LOOP;
-    IF to_regclass('public.mv_source_health') IS NOT NULL THEN
+    -- Internal materialized views: keep them off the Data API (WP-004).
+    FOREACH t IN ARRAY ARRAY[{privmviews}]
+    LOOP
+        CONTINUE WHEN to_regclass('public.' || t) IS NULL;
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-            REVOKE ALL ON mv_source_health FROM anon;
+            EXECUTE format('REVOKE ALL ON %I FROM anon', t);
         END IF;
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-            REVOKE ALL ON mv_source_health FROM authenticated;
+            EXECUTE format('REVOKE ALL ON %I FROM authenticated', t);
         END IF;
-    END IF;
+    END LOOP;
 END $$
-""".format(privtables=", ".join(f"'{t}'" for t in PRIVATE_TABLES))
+""".format(
+    privtables=", ".join(f"'{t}'" for t in PRIVATE_TABLES),
+    privmviews=", ".join(f"'{m}'" for m in PRIVATE_MVIEWS),
+)
 
 
 # Keep administrative functions off the Data API and pin safe search paths.
@@ -942,7 +1019,7 @@ async def ensure_views(session) -> None:
     # allowlist, revoke everything else from the API roles, and keep admin
     # functions off the Data API.
     await session.execute(text(ENSURE_PROJECTIONS))
-    await session.execute(text(GRANT_STATS_VIEW))
+    await session.execute(text(ENSURE_PUBLIC_MV_TABLES))
     await session.execute(text(ENSURE_PUBLIC_READ))
     await session.execute(text(ENSURE_PRIVATE))
     await session.execute(text(HARDEN_FUNCTIONS))
@@ -1295,6 +1372,10 @@ async def run_maintenance() -> None:
         await refresh_public_projections(session)
     async with get_session() as session:
         await session.execute(text("SELECT refresh_breach_views()"))
+    # After the matviews are recomputed, rebuild the public ledger/analytics/stats
+    # projection tables from them (atomic per-table swap).
+    async with get_session() as session:
+        await refresh_public_mv_tables(session)
     logger.info("Maintenance pass complete.")
 
 

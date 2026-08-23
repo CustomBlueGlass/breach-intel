@@ -15,10 +15,10 @@ Traced from the only two anonymous consumers: the frontend queries in
 
 | Object | Kind | anon | why public | columns exposed |
 | --- | --- | --- | --- | --- |
-| `mv_breach_ledger` | matview | yes | the customer-facing ledger + STIX feed | all (already curated product columns) |
-| `mv_breach_trends` | matview | yes | analytics trend chart | week, industry, counts |
-| `mv_top_ransomware_groups` | matview | yes | analytics + group filter | group, victim_count, most_recent |
-| `mv_platform_stats` | matview | yes | hero stat strip | four aggregate counts |
+| `public_breach_ledger` | table | yes | customer-facing ledger + STIX feed (WP-004 projection of `mv_breach_ledger`) | product ledger columns |
+| `public_breach_trends` | table | yes | analytics trend chart (projection of `mv_breach_trends`) | week, industry, counts |
+| `public_top_ransomware_groups` | table | yes | analytics + group filter (projection of `mv_top_ransomware_groups`) | group, victim_count, most_recent |
+| `public_platform_stats` | table | yes | hero stat strip (projection of `mv_platform_stats`) | four aggregate counts |
 | `breaches` | table | yes | core public ledger record (dossier) | product columns only; no PII |
 | `breach_developments` | table | yes | dossier "developments" (fines, suits) | product columns; `dedupe_key` is a non-sensitive hash |
 | `breach_enrichment_log` | table | yes | dossier "enhancement history" | `changed` (diff of public fields), `enriched_at` |
@@ -55,8 +55,12 @@ refresh is a full transactional replace (DELETE + INSERT in one transaction).
 | `breach_companies` | table | not read directly by the UI | `domain` already joined into `mv_breach_ledger` |
 | `breach_collector_log` | table | operational run log (status, error_message) | not surfaced publicly |
 | `breach_match_queue` | table | internal review state (reviewed_by, reasons) | `fetchMatchQueue()` now returns empty for the public site |
-| `threat_actors` | table | not read by the public UI | actor pages derive from `mv_breach_ledger` + the source view |
+| `threat_actors` | table | not read by the public UI | actor pages derive from the public ledger + the source view |
 | `mv_source_health` | matview | operational collector status | not read by the UI |
+| `mv_breach_ledger` | matview | internal compute layer (WP-004) | anon reads `public_breach_ledger` |
+| `mv_breach_trends` | matview | internal compute layer (WP-004) | anon reads `public_breach_trends` |
+| `mv_top_ransomware_groups` | matview | internal compute layer (WP-004) | anon reads `public_top_ransomware_groups` |
+| `mv_platform_stats` | matview | internal compute layer (WP-004) | anon reads `public_platform_stats` |
 
 ## Functions
 
@@ -69,15 +73,22 @@ refresh is a full transactional replace (DELETE + INSERT in one transaction).
 
 ## Documented adviser exceptions
 
-- **Materialized views on the Data API** (`mv_breach_ledger`, `mv_breach_trends`,
-  `mv_top_ransomware_groups`, `mv_platform_stats`): intentionally public. They
-  contain only already-public, aggregate product data and are the customer-facing
-  ledger/analytics. `mv_source_health` (operational) was removed from the API.
+- **Materialized views off the Data API** (WP-004): all five matviews
+  (`mv_breach_ledger`, `mv_breach_trends`, `mv_top_ransomware_groups`,
+  `mv_platform_stats`, `mv_source_health`) have anon/authenticated SELECT revoked.
+  They remain the internal compute layer; the anonymously-readable copies are the
+  `public_breach_ledger` / `public_breach_trends` / `public_top_ransomware_groups`
+  / `public_platform_stats` projection tables, refreshed by owner-side maintenance
+  after `refresh_breach_views()`.
 - **Curated public projection** (`public_breach_sources`, `public_breach_news` +
   their `security_invoker` views): replaces the earlier owner-privileged
   ("security definer") views. No view queries a private table; the projection
   tables are a sanitised public copy refreshed by owner-side maintenance. This
   clears the two "Security Definer View" adviser ERRORs (WP-003).
-- **Extensions in `public`** (`pg_trgm`, `btree_gin`): left in place. Moving them
-  risks breaking the trigram GIN indexes the correlation/search paths depend on.
-  Low severity; tracked as deferred in the PR "Remaining risks".
+- **Extensions in `public`** (`pg_trgm`, `btree_gin`): left in place (WP-004
+  assessment). `pg_trgm` is used by unqualified `similarity()` / `%` / `gin_trgm_ops`
+  across the correlation and news-matching SQL and by five GIN indexes; relocating
+  it to an `extensions` schema would require adding that schema to the search_path
+  of every consumer connection and risks breaking ingestion/correlation. These are
+  trusted first-party contrib extensions, so the residual warning is accepted.
+  A justified residual adviser warning.
