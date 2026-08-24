@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test",
-    "check:functions": "node --check api/stix.js && node --check api/enrich.js && node --check api/exposure.js"
+    "check:functions": "node --check api/stix.js && node --check api/enrich.js && node --check api/exposure.js && node --check api/enquiry.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

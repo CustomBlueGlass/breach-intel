@@ -173,7 +173,35 @@ PRIVATE_TABLES = [
     "breach_source_records", "news_watch", "breach_data_sources",
     "breach_companies", "breach_collector_log", "breach_match_queue",
     "threat_actors",
+    # Monetisation Phase 1: plan enquiries are written only by the trusted
+    # serverless function via the service role; never exposed to the Data API.
+    "plan_enquiries",
 ]
+
+
+# Demand-capture table (plan waitlist / access-request / sales enquiries). Kept
+# fully private by ENSURE_PRIVATE (RLS on, no policy, no API-role grants); the
+# serverless function writes via the service role. Created here so a fresh
+# database self-heals it.
+ENSURE_ENQUIRIES = """
+DO $$
+BEGIN
+    CREATE TABLE IF NOT EXISTS public.plan_enquiries (
+        id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        created_at    timestamptz NOT NULL DEFAULT now(),
+        user_id       uuid,
+        email         text NOT NULL,
+        plan          text NOT NULL CHECK (plan IN ('pro','business','enterprise')),
+        organisation  text,
+        role_use_case text,
+        message       text,
+        source        text,
+        status        text NOT NULL DEFAULT 'new'
+    );
+    CREATE INDEX IF NOT EXISTS idx_plan_enquiries_created ON public.plan_enquiries (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_plan_enquiries_plan    ON public.plan_enquiries (plan);
+END $$
+"""
 
 ENSURE_PUBLIC_READ = """
 DO $$
@@ -1020,6 +1048,7 @@ async def ensure_views(session) -> None:
     # functions off the Data API.
     await session.execute(text(ENSURE_PROJECTIONS))
     await session.execute(text(ENSURE_PUBLIC_MV_TABLES))
+    await session.execute(text(ENSURE_ENQUIRIES))
     await session.execute(text(ENSURE_PUBLIC_READ))
     await session.execute(text(ENSURE_PRIVATE))
     await session.execute(text(HARDEN_FUNCTIONS))

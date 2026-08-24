@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LogIn, LogOut, Mail, ShieldCheck, KeyRound, BellRing, Lock } from 'lucide-react';
 import { COLORS, FONT_DISPLAY, FONT_BODY, FONT_MONO, fmtDate } from './constants';
 import { useAuth } from './lib/auth';
+import { track, EVENTS } from './lib/analytics';
 
 /* Sign-in modal, the top-bar auth control plus the signed-in dashboard.
    Passwordless magic-link is the primary flow. Billing is not wired yet, so
@@ -166,7 +167,7 @@ export function AuthButton({ onOpenAuth, onDashboard }) {
   );
 }
 
-function LockedFeature({ Icon, title, unlock }) {
+function LockedFeature({ Icon, title, unlock, ctaLabel, onCta }) {
   return (
     <div className="rounded-lg p-4" style={{ backgroundColor: COLORS.panel, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center gap-2 mb-1">
@@ -175,13 +176,21 @@ function LockedFeature({ Icon, title, unlock }) {
         <Lock size={12} color={COLORS.boneFaint} className="ml-auto" />
       </div>
       <div className="text-xs" style={{ color: COLORS.boneFaint, fontFamily: FONT_BODY }}>{unlock}</div>
+      {ctaLabel && onCta && (
+        <button onClick={onCta} className="mt-3 rounded-md px-2.5 py-1 text-xs font-semibold"
+          style={{ fontFamily: FONT_BODY, color: COLORS.amber, border: `1px solid ${COLORS.amber}`, backgroundColor: 'transparent' }}>
+          {ctaLabel}
+        </button>
+      )}
     </div>
   );
 }
 
-export function DashboardView({ onBrowsePlans }) {
+export function DashboardView({ onBrowsePlans, onEnquire }) {
   const { user, signOut } = useAuth();
+  useEffect(() => { track(EVENTS.UPGRADE_PROMPT_SHOWN, { source: 'dashboard' }); }, []);
   if (!user) return null;
+  const enquire = (plan) => { track(EVENTS.UPGRADE_PROMPT_SELECTED, { plan, source: 'dashboard' }); onEnquire?.(plan); };
   return (
     <div className="px-6 py-10 max-w-3xl">
       <h1 className="mb-6" style={{ fontFamily: FONT_DISPLAY, color: COLORS.bone, fontSize: 26, fontWeight: 600 }}>Dashboard</h1>
@@ -210,8 +219,10 @@ export function DashboardView({ onBrowsePlans }) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <LockedFeature Icon={KeyRound} title="API key" unlock="Unlocks on Pro. Query the ledger plus enrichment from your own tooling." />
-        <LockedFeature Icon={BellRing} title="Monitoring and alerts" unlock="Unlocks on Business. Watch your domains for new breaches plus credential exposure." />
+        <LockedFeature Icon={KeyRound} title="API key" unlock="Unlocks on Pro. Query the ledger plus enrichment from your own tooling."
+          ctaLabel="Join Pro waitlist" onCta={() => enquire('pro')} />
+        <LockedFeature Icon={BellRing} title="Monitoring and alerts" unlock="Unlocks on Business. Watch your domains for new breaches plus credential exposure."
+          ctaLabel="Request Business access" onCta={() => enquire('business')} />
       </div>
 
       <button

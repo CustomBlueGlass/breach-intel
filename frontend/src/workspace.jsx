@@ -1,6 +1,7 @@
-import React from 'react';
-import { Star, Clock, Building2, ShieldAlert, X, Trash2, Bookmark } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { Star, Clock, Building2, ShieldAlert, X, Trash2, Bookmark, Cloud } from 'lucide-react';
 import { COLORS, FONT_DISPLAY, FONT_BODY, FONT_MONO } from './constants';
+import { track, EVENTS } from './lib/analytics';
 
 /* ============================================================================
    Analyst workspace — a personal, browser-local layer over the public ledger:
@@ -42,12 +43,14 @@ function Item({ icon: Icon, label, sub, color, onOpen, onRemove }) {
   );
 }
 
-export function WorkspaceView({ watchlist, recent, onOpenBreach, onOpenActor, onRemoveWatchBreach, onRemoveWatchActor, onClearRecent }) {
+export function WorkspaceView({ watchlist, recent, onOpenBreach, onOpenActor, onRemoveWatchBreach, onRemoveWatchActor, onClearRecent, onEnquire }) {
   const wb = watchlist?.breaches || [];
   const wa = watchlist?.actors || [];
   const rb = recent?.breaches || [];
   const ra = recent?.actors || [];
   const recentEmpty = rb.length === 0 && ra.length === 0;
+
+  useEffect(() => { if (onEnquire) track(EVENTS.UPGRADE_PROMPT_SHOWN, { source: 'workspace' }); }, [onEnquire]);
 
   return (
     <div className="px-6 py-6">
@@ -55,9 +58,24 @@ export function WorkspaceView({ watchlist, recent, onOpenBreach, onOpenActor, on
         <Bookmark size={16} color={COLORS.amber} />
         <h2 style={{ fontFamily: FONT_DISPLAY, color: COLORS.bone, fontSize: 22, fontWeight: 600 }}>Workspace</h2>
       </div>
-      <p className="text-sm mb-5 max-w-2xl" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+      <p className="text-sm mb-4 max-w-2xl" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
         Your saved companies and threat actors, plus what you have looked at recently. Stored only in this browser.
       </p>
+
+      {onEnquire && (
+        <div className="flex flex-wrap items-center gap-3 mb-5 rounded-lg px-4 py-3" style={{ border: `1px solid ${COLORS.line}`, backgroundColor: COLORS.panel }}>
+          <Cloud size={15} color={COLORS.amber} className="shrink-0" />
+          <span className="text-xs" style={{ color: COLORS.boneDim, fontFamily: FONT_BODY }}>
+            This watchlist lives only in this browser. Cloud watchlists that sync across devices, saved searches and new-breach alerts come with Analyst Pro.
+          </span>
+          <button
+            onClick={() => { track(EVENTS.UPGRADE_PROMPT_SELECTED, { plan: 'pro', source: 'workspace' }); onEnquire('pro'); }}
+            className="ml-auto shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold"
+            style={{ fontFamily: FONT_BODY, color: COLORS.amber, border: `1px solid ${COLORS.amber}`, backgroundColor: 'transparent' }}>
+            Join Pro waitlist
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-5 md:grid-cols-2">
         <Section icon={Star} title={`Watchlist · companies (${wb.length})`}>
