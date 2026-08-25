@@ -32,17 +32,18 @@ public ledger data, and adds no third-party trackers.
   SECURITY DEFINER, revoked from PUBLIC/anon/authenticated, granted EXECUTE to
   `service_role` only.
 
-`backend/app/maintenance.py` self-heals all three objects on every ingest
-(`ensure_views`), so a fresh or drifted database converges to the same private state
-without a manual migration. `plan_enquiries` and `rate_limits` are in
-`PRIVATE_TABLES`; `rl_hit` is locked down in `HARDEN_FUNCTIONS`; stale rate-limit
-buckets are pruned each pass.
-
-Apply manually (optional, since maintenance self-heals):
+For the initial launch, apply the migration explicitly (see Deployment steps). Do not
+wait for a maintenance run to create these objects:
 
 ```
 psql "$DATABASE_URL" -f db/migrations/0004_demand_capture.sql
 ```
+
+`backend/app/maintenance.py` then self-heals all three objects on every ingest
+(`ensure_views`), keeping a drifted database converged to the same private state.
+`plan_enquiries` and `rate_limits` are in `PRIVATE_TABLES`; `rl_hit` is locked down in
+`HARDEN_FUNCTIONS`; stale rate-limit buckets are pruned each pass. That is ongoing
+drift protection, not a substitute for applying the migration at launch.
 
 Rollback is documented at the foot of the migration file. Dropping `plan_enquiries`
 destroys captured enquiries.
@@ -56,9 +57,25 @@ cannot bound abuse across instances. The limiter lives in Postgres:
 - Per verified user: 10 enquiries / 3600s, checked after sign-in.
 - A request with no bearer token is rejected with 401 before any upstream call, so the
   endpoint cannot be used as an unauthenticated amplifier.
-- `rl_hit` fails open on a transport error: a transient database blip must not block a
-  genuine, authenticated enquiry. The auth gate, validation and the private table
-  still bound abuse.
+- The limiter FAILS CLOSED. If `rl_hit` errors, times out or returns a non-boolean, the
+  request is rejected with a generic `503` and never reaches authentication or the
+  insert. The response carries no database detail.
+
+### Client IP trust and privacy
+
+- The client IP is read from the platform proxy header the deployment controls:
+  `x-vercel-forwarded-for` first, then `x-real-ip`. On Vercel these are set at the
+  edge and cannot be forged by the client.
+- `x-forwarded-for` is only a last resort. Its first entry is attacker-controlled, so
+  we take the last hop (added by the nearest trusted proxy), never the first value.
+- The address is normalised (zone id and port stripped, IPv4 and IPv6 handled, lower
+  cased) before use.
+- The bucket stores a keyed hash of the IP (HMAC-SHA256 with the server-side service
+  key), so `rate_limits` never contains a raw IP address or user id.
+
+Trust assumption: this holds on Vercel, where the platform overwrites the
+`x-vercel-forwarded-for` / `x-real-ip` headers. Behind a different proxy, set the
+trusted header accordingly.
 
 ## Environment variables
 
@@ -75,16 +92,24 @@ The service-role key must never enter the client bundle. This is enforced by tes
 
 ## Deployment steps
 
-1. Merge the Phase 1 PR to `main`. Vercel builds and deploys the frontend and the
-   `api/enquiry` function.
-2. Add `SUPABASE_SERVICE_ROLE_KEY` to Vercel (Production), server-side only. Redeploy
-   so functions pick it up.
-3. Apply migration 0004, or let the next scheduled maintenance run self-heal the
-   objects. Confirm with:
+Do these in order. Do not rely on a future maintenance run to create the objects for
+the initial launch: apply the migration explicitly first.
+
+1. Apply migration 0004 to the production database:
+   `psql "$DATABASE_URL" -f db/migrations/0004_demand_capture.sql`
+   Confirm the objects exist:
    `select to_regclass('public.plan_enquiries'), to_regclass('public.rate_limits'), to_regprocedure('public.rl_hit(text,integer,integer)');`
-4. Smoke test: signed-out, an enquiry CTA shows the sign-in gate. Signed-in, a
-   submission returns 201 and the row appears in `plan_enquiries`. Reading
-   `plan_enquiries` with the anon key returns nothing.
+2. Add `SUPABASE_SERVICE_ROLE_KEY` to Vercel (Production), server-side only, not
+   `VITE_`-prefixed.
+3. Redeploy so the functions pick up the new environment variable.
+4. Smoke-test the endpoint: signed-out, an enquiry CTA shows the sign-in gate.
+   Signed-in, a submission returns 201 and the row appears in `plan_enquiries`. Reading
+   `plan_enquiries` with the anon key returns nothing. A malformed or limiter-down
+   request returns 503, never a false success.
+5. Only then enable public Production access (Deployment Protection, below).
+
+The maintenance self-heal (`ensure_views`) keeps these objects present and private on
+every ingest thereafter. That is ongoing drift protection, not the launch mechanism.
 
 ## Vercel Deployment Protection
 

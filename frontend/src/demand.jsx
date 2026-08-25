@@ -45,7 +45,9 @@ export function EnquiryModal({ open, plan, source = 'pricing_page', onClose, onS
       });
       const data = await r.json().catch(() => ({}));
       if (r.status === 401 || data.authRequired) { setSt({ status: 'auth' }); return; }
-      if (r.status === 503 || data.configured === false) { setSt({ status: 'unavailable' }); return; }
+      // Only a genuinely unconfigured host is "unavailable"; a transient 503
+      // (e.g. the rate limiter failing closed) is a retryable error.
+      if (data.configured === false) { setSt({ status: 'unavailable' }); return; }
       if (!r.ok || !data.ok) { setSt({ status: 'error', msg: data.error || 'Something went wrong. Please try again.' }); return; }
       // Only record success after the server confirms persistence.
       setSt({ status: 'done' });

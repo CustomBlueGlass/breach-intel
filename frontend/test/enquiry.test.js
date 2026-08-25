@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import handler, { validateEnquiry } from "../api/enquiry.js";
+import handler, { validateEnquiry, clientIp, normalizeIp } from "../api/enquiry.js";
 
 function mockRes() {
   return {
@@ -142,19 +142,88 @@ test("enquiry: durable limiter (rl_hit) over budget -> 429, no insert", async ()
   } finally { clearEnv(); }
 });
 
-test("enquiry: rl_hit transport failure fails OPEN (still 201)", async () => {
-  // A transient limiter outage must not block a genuine, authenticated enquiry.
+test("enquiry: rl_hit transport failure fails CLOSED (503, no auth, no insert)", async () => {
+  // A limiter that fails open is not a limiter. On a transport error the request
+  // is rejected with a generic 503 before authentication or the insert.
   setEnv();
+  let authCalled = false, insertCalled = false;
   try {
     await withFetch(async (url) => {
       if (url.includes("/rest/v1/rpc/rl_hit")) throw new Error("db unreachable");
-      if (url.includes("/auth/v1/user")) return { ok: true, status: 200, json: async () => ({ id: "u", email: "e@e.com" }) };
-      if (url.includes("/rest/v1/plan_enquiries")) return { status: 201, json: async () => ({}) };
+      if (url.includes("/auth/v1/user")) { authCalled = true; return { ok: true, status: 200, json: async () => ({ id: "u", email: "e@e.com" }) }; }
+      if (url.includes("/rest/v1/plan_enquiries")) { insertCalled = true; return { status: 201, json: async () => ({}) }; }
       return { ok: true, status: 200, json: async () => ({}) };
     }, async () => {
       const res = mockRes();
       await handler(reqOf({ headers: { authorization: "Bearer tok", "x-forwarded-for": "open-ip" }, body: { plan: "pro" } }), res);
-      assert.equal(res.statusCode, 201);
+      assert.equal(res.statusCode, 503);
+      assert.equal(/service|unavailable/i.test(res.body.error), true);
+      assert.equal(res.body.configured, undefined, "must not leak configuration/database detail");
     });
+    assert.equal(authCalled, false, "limiter error must block before the auth call");
+    assert.equal(insertCalled, false, "limiter error must block before the insert");
   } finally { clearEnv(); }
+});
+
+test("enquiry: rl_hit non-2xx fails CLOSED (503, no insert)", async () => {
+  setEnv();
+  let insertCalled = false;
+  try {
+    await withFetch(async (url) => {
+      if (url.includes("/rest/v1/rpc/rl_hit")) return { ok: false, status: 500, json: async () => ({ message: "boom" }) };
+      if (url.includes("/auth/v1/user")) return { ok: true, status: 200, json: async () => ({ id: "u", email: "e@e.com" }) };
+      if (url.includes("/rest/v1/plan_enquiries")) { insertCalled = true; return { status: 201, json: async () => ({}) }; }
+      return { ok: true, status: 200, json: async () => ({}) };
+    }, async () => {
+      const res = mockRes();
+      await handler(reqOf({ headers: { authorization: "Bearer tok", "x-forwarded-for": "err-ip" }, body: { plan: "pro" } }), res);
+      assert.equal(res.statusCode, 503);
+    });
+    assert.equal(insertCalled, false);
+  } finally { clearEnv(); }
+});
+
+test("enquiry: rl_hit malformed (non-boolean) body fails CLOSED (503, no insert)", async () => {
+  setEnv();
+  let insertCalled = false;
+  try {
+    await withFetch(async (url) => {
+      if (url.includes("/rest/v1/rpc/rl_hit")) return { ok: true, status: 200, json: async () => ({ unexpected: "shape" }) };
+      if (url.includes("/auth/v1/user")) return { ok: true, status: 200, json: async () => ({ id: "u", email: "e@e.com" }) };
+      if (url.includes("/rest/v1/plan_enquiries")) { insertCalled = true; return { status: 201, json: async () => ({}) }; }
+      return { ok: true, status: 200, json: async () => ({}) };
+    }, async () => {
+      const res = mockRes();
+      await handler(reqOf({ headers: { authorization: "Bearer tok", "x-forwarded-for": "mal-ip" }, body: { plan: "pro" } }), res);
+      assert.equal(res.statusCode, 503);
+    });
+    assert.equal(insertCalled, false, "a non-boolean limiter response must never reach the insert");
+  } finally { clearEnv(); }
+});
+
+// ---- client IP extraction (Vercel-aware, anti-spoof) ----
+test("clientIp: trusts the platform header, ignores a forged X-Forwarded-For", () => {
+  const forged = { "x-forwarded-for": "1.2.3.4", "x-vercel-forwarded-for": "203.0.113.9" };
+  assert.equal(clientIp({ headers: forged }), "203.0.113.9");
+  // Forging only X-Forwarded-For must not change the derived IP once the trusted
+  // header is fixed, so an attacker cannot split their bucket to evade the limit.
+  const a = clientIp({ headers: { "x-vercel-forwarded-for": "203.0.113.9", "x-forwarded-for": "9.9.9.9" } });
+  const b = clientIp({ headers: { "x-vercel-forwarded-for": "203.0.113.9", "x-forwarded-for": "8.8.8.8" } });
+  assert.equal(a, b);
+  // x-real-ip is the next most trusted platform header.
+  assert.equal(clientIp({ headers: { "x-real-ip": "198.51.100.7", "x-forwarded-for": "1.1.1.1" } }), "198.51.100.7");
+});
+
+test("clientIp: with only X-Forwarded-For, uses the last hop not the client-forged first", () => {
+  // chain is client, proxy1, proxy2 (nearest trusted proxy last)
+  assert.equal(clientIp({ headers: { "x-forwarded-for": "1.2.3.4, 70.0.0.1, 100.64.0.5" } }), "100.64.0.5");
+});
+
+test("normalizeIp: strips ports/zones, handles IPv4 and IPv6", () => {
+  assert.equal(normalizeIp("203.0.113.5:56789"), "203.0.113.5");
+  assert.equal(normalizeIp("[2001:db8::1]:443"), "2001:db8::1");
+  assert.equal(normalizeIp("2001:DB8::AB"), "2001:db8::ab");        // bare v6, lower-cased
+  assert.equal(normalizeIp("fe80::1%eth0"), "fe80::1");             // zone id dropped
+  assert.equal(normalizeIp("  198.51.100.7  "), "198.51.100.7");
+  assert.equal(normalizeIp(""), "");
 });
