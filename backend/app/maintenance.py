@@ -173,7 +173,91 @@ PRIVATE_TABLES = [
     "breach_source_records", "news_watch", "breach_data_sources",
     "breach_companies", "breach_collector_log", "breach_match_queue",
     "threat_actors",
+    # Monetisation Phase 1: plan enquiries are written only by the trusted
+    # serverless function via the service role; never exposed to the Data API.
+    "plan_enquiries",
+    # Durable rate-limit counters, written only via rl_hit() by the service role.
+    "rate_limits",
 ]
+
+
+# Demand-capture table (plan waitlist / access-request / sales enquiries). Kept
+# fully private by ENSURE_PRIVATE (RLS on, no policy, no API-role grants); the
+# serverless function writes via the service role. Created here so a fresh
+# database self-heals it.
+ENSURE_ENQUIRIES = """
+DO $$
+BEGIN
+    CREATE TABLE IF NOT EXISTS public.plan_enquiries (
+        id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        created_at    timestamptz NOT NULL DEFAULT now(),
+        user_id       uuid,
+        email         text NOT NULL,
+        plan          text NOT NULL CHECK (plan IN ('pro','business','enterprise')),
+        organisation  text,
+        role_use_case text,
+        message       text,
+        source        text,
+        status        text NOT NULL DEFAULT 'new'
+    );
+    CREATE INDEX IF NOT EXISTS idx_plan_enquiries_created ON public.plan_enquiries (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_plan_enquiries_plan    ON public.plan_enquiries (plan);
+END $$
+"""
+
+
+# Durable, cross-instance rate limiting. Vercel functions are stateless and
+# horizontally scaled, so an in-process counter cannot bound abuse; this shared
+# table (kept private by ENSURE_PRIVATE) can. Written only via rl_hit().
+ENSURE_RATE_LIMITS = """
+DO $$
+BEGIN
+    CREATE TABLE IF NOT EXISTS public.rate_limits (
+        bucket       text PRIMARY KEY,
+        window_start timestamptz NOT NULL DEFAULT now(),
+        hits         integer NOT NULL DEFAULT 0
+    );
+END $$
+"""
+
+# Atomic fixed-window counter used by frontend/api/enquiry.js. SECURITY DEFINER
+# so the service role needs only EXECUTE (granted in HARDEN_FUNCTIONS), never
+# direct table rights. Returns true while within the limit, false once exceeded.
+RL_HIT_FUNCTION = """
+CREATE OR REPLACE FUNCTION public.rl_hit(p_bucket text, p_limit integer, p_window_secs integer)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE
+    v_hits integer;
+BEGIN
+    IF p_bucket IS NULL OR p_limit IS NULL OR p_window_secs IS NULL THEN
+        RETURN true;
+    END IF;
+    INSERT INTO public.rate_limits AS rl (bucket, window_start, hits)
+    VALUES (p_bucket, now(), 1)
+    ON CONFLICT (bucket) DO UPDATE
+        SET hits = CASE WHEN rl.window_start < now() - make_interval(secs => p_window_secs)
+                        THEN 1 ELSE rl.hits + 1 END,
+            window_start = CASE WHEN rl.window_start < now() - make_interval(secs => p_window_secs)
+                                THEN now() ELSE rl.window_start END
+        RETURNING rl.hits INTO v_hits;
+    RETURN v_hits <= p_limit;
+END
+$fn$
+"""
+
+# Keep the counter table from growing unbounded with stale one-off buckets.
+PRUNE_RATE_LIMITS = """
+DO $$
+BEGIN
+    IF to_regclass('public.rate_limits') IS NOT NULL THEN
+        DELETE FROM public.rate_limits WHERE window_start < now() - interval '1 day';
+    END IF;
+END $$
+"""
 
 ENSURE_PUBLIC_READ = """
 DO $$
@@ -490,6 +574,20 @@ BEGIN
             REVOKE ALL ON FUNCTION public.rls_auto_enable() FROM authenticated;
         END IF;
         ALTER FUNCTION public.rls_auto_enable() SET search_path = pg_catalog, public;
+    END IF;
+    -- Demand-capture rate limiter: callable only by the service role.
+    IF to_regprocedure('public.rl_hit(text,integer,integer)') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.rl_hit(text,integer,integer) FROM PUBLIC;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            REVOKE ALL ON FUNCTION public.rl_hit(text,integer,integer) FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+            REVOKE ALL ON FUNCTION public.rl_hit(text,integer,integer) FROM authenticated;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+            GRANT EXECUTE ON FUNCTION public.rl_hit(text,integer,integer) TO service_role;
+        END IF;
+        ALTER FUNCTION public.rl_hit(text,integer,integer) SET search_path = pg_catalog, public;
     END IF;
     IF to_regprocedure('public.set_updated_at()') IS NOT NULL THEN
         ALTER FUNCTION public.set_updated_at() SET search_path = pg_catalog, public;
@@ -1020,9 +1118,13 @@ async def ensure_views(session) -> None:
     # functions off the Data API.
     await session.execute(text(ENSURE_PROJECTIONS))
     await session.execute(text(ENSURE_PUBLIC_MV_TABLES))
+    await session.execute(text(ENSURE_ENQUIRIES))
+    await session.execute(text(ENSURE_RATE_LIMITS))
+    await session.execute(text(RL_HIT_FUNCTION))
     await session.execute(text(ENSURE_PUBLIC_READ))
     await session.execute(text(ENSURE_PRIVATE))
     await session.execute(text(HARDEN_FUNCTIONS))
+    await session.execute(text(PRUNE_RATE_LIMITS))
 
 
 async def backfill_attack_cve(session) -> None:

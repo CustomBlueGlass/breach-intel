@@ -60,6 +60,23 @@ SELECT _assert_denied('threat_actors');
 SELECT _assert_denied('news_watch');
 SELECT _assert_denied('mv_source_health');
 
+-- Monetisation Phase 1: demand-capture table is fully private (no read, no write).
+SELECT _assert_denied('plan_enquiries');
+SELECT _assert_write_denied('plan_enquiries');
+
+-- Monetisation Phase 1: the durable rate-limit store is fully private, and its
+-- rl_hit() counter is not callable by the anon role (only the service role is).
+SELECT _assert_denied('rate_limits');
+SELECT _assert_write_denied('rate_limits');
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.rl_hit('assert', 1, 60);
+    RAISE EXCEPTION 'SECURITY FAIL: role % can execute rl_hit()', current_user;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;   -- expected
+  END;
+END $$;
+
 -- WP-004: the product matviews are now internal (compute layer) and must be denied.
 SELECT _assert_denied('mv_breach_ledger');
 SELECT _assert_denied('mv_breach_trends');
@@ -167,7 +184,26 @@ END $$;
 
 RESET ROLE;
 
+-- The authenticated API role must also have no access to the private
+-- demand-capture / rate-limit tables (only the service role writes them) and
+-- must not be able to call the rate-limit counter.
+SET ROLE authenticated;
+SELECT _assert_denied('plan_enquiries');
+SELECT _assert_write_denied('plan_enquiries');
+SELECT _assert_denied('rate_limits');
+SELECT _assert_write_denied('rate_limits');
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.rl_hit('assert', 1, 60);
+    RAISE EXCEPTION 'SECURITY FAIL: role % can execute rl_hit()', current_user;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;   -- expected
+  END;
+END $$;
+RESET ROLE;
+
 DROP FUNCTION _assert_denied(text);
 DROP FUNCTION _assert_allowed(text);
+DROP FUNCTION _assert_write_denied(text);
 
 SELECT 'ALL SECURITY ASSERTIONS PASSED' AS result;

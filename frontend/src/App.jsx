@@ -14,6 +14,7 @@ import { MethodologyView } from './methodology';
 import { PricingView } from './pricing';
 import { useAuth } from './lib/auth';
 import { AuthModal, AuthButton, DashboardView } from './account';
+import { EnquiryModal } from './demand';
 import {
   fetchStats, fetchRecentIntake, fetchRansomwareGroupOptions, fetchBreaches,
   fetchBreachesForExport, fetchBreachDetail, fetchTrends, fetchTopGroups, fetchMatchQueue,
@@ -67,6 +68,8 @@ export default function App() {
 
   const { session } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
+  // Demand-capture modal target: { plan, source } or null.
+  const [enquiry, setEnquiry] = useState(null);
 
   const [tab, setTab] = useState('ledger');
   const [filters, setFilters] = useState({ q: '', industry: '', group: '', attribution: '', dateFrom: '', dateTo: '' });
@@ -424,14 +427,20 @@ export default function App() {
           onRemoveWatchBreach={(id) => setWatchlist((w) => ({ ...w, breaches: (w.breaches || []).filter((x) => x.id !== id) }))}
           onRemoveWatchActor={(g) => toggleWatchActor(g)}
           onClearRecent={() => setRecentViewed({ breaches: [], actors: [] })}
+          onEnquire={(plan) => setEnquiry({ plan, source: 'workspace' })}
         />
       )}
 
       {tab === 'tools' && <ToolsView />}
 
-      {tab === 'pricing' && <PricingView onStart={() => setTab('ledger')} />}
+      {tab === 'pricing' && <PricingView onStart={() => setTab('ledger')} onEnquire={(plan, source) => setEnquiry({ plan, source })} />}
 
-      {tab === 'dashboard' && session && <DashboardView onBrowsePlans={() => setTab('pricing')} />}
+      {tab === 'dashboard' && session && (
+        <DashboardView
+          onBrowsePlans={() => setTab('pricing')}
+          onEnquire={(plan) => setEnquiry({ plan, source: 'dashboard' })}
+        />
+      )}
 
       {tab === 'about' && <AboutView onMethodology={() => setTab('methodology')} />}
 
@@ -441,6 +450,13 @@ export default function App() {
 
       <Footer onAbout={() => setTab('about')} onMethodology={() => setTab('methodology')} />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <EnquiryModal
+        open={!!enquiry}
+        plan={enquiry?.plan}
+        source={enquiry?.source}
+        onClose={() => setEnquiry(null)}
+        onSignIn={() => setAuthOpen(true)}
+      />
       <CommandPalette
         open={paletteOpen}
         setOpen={setPaletteOpen}
