@@ -12,11 +12,17 @@ set, and the impact of rotating it.
 | `VITE_SUPABASE_URL` | frontend build + serverless (`api/stix`, `api/exposure`) | public | Vercel (build + functions) | project URL; changes only on project move |
 | `VITE_SUPABASE_ANON_KEY` | frontend + serverless | publishable | Vercel | SELECT-only under RLS; safe in the client bundle; rotate if abused, then redeploy |
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` | serverless fallback names | same as above | Vercel (optional) | as above |
+| `SUPABASE_SERVICE_ROLE_KEY` | serverless `api/enquiry` only (demand capture) | **secret (high impact)** | Vercel functions env (server-side, **never** `VITE_`) | writes demand-capture rows + calls the `rl_hit` rate-limit RPC; bypasses RLS. If unset, `/api/enquiry` returns `503 configured:false` and captures nothing. Rotating disables capture until updated. Never place in the client bundle. |
 | `DATABASE_URL` | GitHub Actions ingestion + maintenance | **secret (high impact)** | GitHub Actions secret | owner/service DB connection; bypasses RLS. Rotating breaks all workflows until updated. Never place in frontend or Vercel. |
 
-There is **no Supabase service-role key in the repository or the frontend/serverless
-code** (asserted by a test). Privileged database access is only the Actions-only
-`DATABASE_URL`.
+The Supabase **service-role key is used by exactly one serverless function**,
+`api/enquiry` (monetisation Phase 1), and only from the server environment via
+`process.env.SUPABASE_SERVICE_ROLE_KEY`. It is asserted (`test/api-security.test.js`)
+that no client source under `src/` references a service role, that the read-only
+functions stay anon-only, and that `api/enquiry` never uses a `VITE_`-prefixed name
+nor returns the key to a client. A build-time bundle scan confirms the name and value
+never enter `dist/`. The other privileged credential, `DATABASE_URL`, remains
+Actions-only.
 
 ## Third-party provider keys (server-side only)
 

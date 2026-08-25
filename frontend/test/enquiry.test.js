@@ -80,6 +80,7 @@ test("enquiry: valid session + body -> 201; email/user_id come from session, not
   let insertAuth = null;
   try {
     await withFetch(async (url, opts) => {
+      if (url.includes("/rest/v1/rpc/rl_hit")) return { ok: true, status: 200, json: async () => true };
       if (url.includes("/auth/v1/user")) return { ok: true, status: 200, json: async () => ({ id: "user-123", email: "real@corp.com" }) };
       if (url.includes("/rest/v1/plan_enquiries")) {
         insertBody = JSON.parse(opts.body);
@@ -107,6 +108,7 @@ test("enquiry: invalid plan with a valid session -> 400", async () => {
   setEnv();
   try {
     await withFetch(async (url) => {
+      if (url.includes("/rest/v1/rpc/rl_hit")) return { ok: true, status: 200, json: async () => true };
       if (url.includes("/auth/v1/user")) return { ok: true, status: 200, json: async () => ({ id: "u", email: "e@e.com" }) };
       return { status: 201, json: async () => ({}) };
     }, async () => {
@@ -117,19 +119,42 @@ test("enquiry: invalid plan with a valid session -> 400", async () => {
   } finally { clearEnv(); }
 });
 
-test("enquiry: rate limit -> 429 for a hot client", async () => {
+test("enquiry: durable limiter (rl_hit) over budget -> 429, no insert", async () => {
+  // The limiter is durable, not in-memory: when the shared Postgres counter
+  // reports over budget, a single request is rejected with 429 and never
+  // reaches the auth or insert calls.
   setEnv();
-  let last = mockRes();
+  let authCalled = false, insertCalled = false;
   try {
     await withFetch(async (url) => {
-      if (url.includes("/auth/v1/user")) return { ok: true, status: 200, json: async () => ({ id: "u", email: "e@e.com" }) };
-      return { status: 201, json: async () => ({}) };
+      if (url.includes("/rest/v1/rpc/rl_hit")) return { ok: true, status: 200, json: async () => false };
+      if (url.includes("/auth/v1/user")) { authCalled = true; return { ok: true, status: 200, json: async () => ({ id: "u", email: "e@e.com" }) }; }
+      if (url.includes("/rest/v1/plan_enquiries")) { insertCalled = true; return { status: 201, json: async () => ({}) }; }
+      return { ok: true, status: 200, json: async () => ({}) };
     }, async () => {
-      for (let i = 0; i < 12; i++) {
-        last = mockRes();
-        await handler({ method: "POST", headers: { authorization: "Bearer tok", "x-forwarded-for": "hot-ip" }, socket: {}, body: { plan: "pro" } }, last);
-      }
+      const res = mockRes();
+      await handler(reqOf({ headers: { authorization: "Bearer tok", "x-forwarded-for": "hot-ip" }, body: { plan: "pro" } }), res);
+      assert.equal(res.statusCode, 429);
+      assert.equal(res.headers["retry-after"], "60");
     });
-    assert.equal(last.statusCode, 429);
+    assert.equal(authCalled, false, "over-budget IP must be blocked before the auth call");
+    assert.equal(insertCalled, false, "over-budget request must not insert");
+  } finally { clearEnv(); }
+});
+
+test("enquiry: rl_hit transport failure fails OPEN (still 201)", async () => {
+  // A transient limiter outage must not block a genuine, authenticated enquiry.
+  setEnv();
+  try {
+    await withFetch(async (url) => {
+      if (url.includes("/rest/v1/rpc/rl_hit")) throw new Error("db unreachable");
+      if (url.includes("/auth/v1/user")) return { ok: true, status: 200, json: async () => ({ id: "u", email: "e@e.com" }) };
+      if (url.includes("/rest/v1/plan_enquiries")) return { status: 201, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({}) };
+    }, async () => {
+      const res = mockRes();
+      await handler(reqOf({ headers: { authorization: "Bearer tok", "x-forwarded-for": "open-ip" }, body: { plan: "pro" } }), res);
+      assert.equal(res.statusCode, 201);
+    });
   } finally { clearEnv(); }
 });

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -183,14 +183,36 @@ test("vercel.json ships the expected security headers", () => {
 });
 
 // ---------------- no privileged key on the client ----------------
-test("no service-role key is referenced in client or serverless code", () => {
-  const root = join(HERE, "..");
-  const files = [
-    "src/lib/supabaseClient.js", "src/lib/api.js", "src/lib/auth.jsx",
-    "api/stix.js", "api/enrich.js", "api/exposure.js",
-  ];
-  for (const f of files) {
-    const txt = readFileSync(join(root, f), "utf8");
-    assert.doesNotMatch(txt, /service_role|SERVICE_ROLE/i, `${f} must not reference a service-role key`);
+function walk(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = join(dir, e.name);
+    return e.isDirectory() ? walk(p) : [p];
+  });
+}
+
+test("no service-role key anywhere in the client bundle source (src/)", () => {
+  // Nothing shipped to the browser may reference the service role. Scan the
+  // whole client tree, not a hand-picked list, so a new client file cannot
+  // silently reintroduce it.
+  for (const p of walk(join(HERE, "..", "src"))) {
+    if (!/\.(jsx?|tsx?)$/.test(p)) continue;
+    assert.doesNotMatch(readFileSync(p, "utf8"), /service_role|SERVICE_ROLE/i, `${p} must not reference a service-role key`);
   }
+});
+
+test("read-only serverless functions stay anon-only (no service-role key)", () => {
+  for (const f of ["api/stix.js", "api/enrich.js", "api/exposure.js"]) {
+    assert.doesNotMatch(readFileSync(join(HERE, "..", f), "utf8"), /service_role|SERVICE_ROLE/i, `${f} must not reference a service-role key`);
+  }
+});
+
+test("api/enquiry.js uses the service role only server-side, never VITE-exposed or returned", () => {
+  // Demand capture is the one function that writes to a private table, so it
+  // legitimately needs the service role — but only from the server environment.
+  const txt = readFileSync(join(HERE, "..", "api/enquiry.js"), "utf8");
+  assert.match(txt, /process\.env\.SUPABASE_SERVICE_ROLE_KEY/, "must read the key from the server environment");
+  // A VITE_-prefixed name would be inlined into the browser bundle by Vite.
+  assert.doesNotMatch(txt, /VITE_[A-Z0-9_]*SERVICE_ROLE/i, "must never use a VITE_-prefixed service-role name");
+  // The key must never be written into a response body.
+  assert.doesNotMatch(txt, /res\.(json|send|end)\([^)]*\bservice\b/i, "must never return the service-role value to a client");
 });
