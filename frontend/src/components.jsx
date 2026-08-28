@@ -678,10 +678,15 @@ export function LedgerTable({ rows, onOpen, onActorClick, page, totalPages, setP
       {/* Desktop: full sortable table. Hidden below md, where a multi-column
           table is unusable — a card list renders instead. */}
       <div className="overflow-x-auto hidden md:block">
-        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: tableWidth }}>
+        {/* width:100% + minWidth makes rows span the full container on wide
+            screens (no dead zone on the right) while still scrolling on narrow
+            ones. Data columns keep their exact set widths; the trailing actions
+            column is auto, so it absorbs the slack and the chevron stays pinned
+            to the right edge. */}
+        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: '100%', minWidth: tableWidth }}>
           <colgroup>
             {cols.map((c) => <col key={c.key} style={{ width: colWidthOf(colWidths, c.key) }} />)}
-            <col style={{ width: ACTIONS_WIDTH }} />
+            <col style={{ minWidth: ACTIONS_WIDTH }} />
           </colgroup>
           <thead>
             <tr style={{ borderBottom: `1px solid ${COLORS.line}` }}>
