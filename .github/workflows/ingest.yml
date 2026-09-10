@@ -1,14 +1,47 @@
-name: Ingest breach sources (every 4 hours)
+name: Ingest breach sources (twice daily, UK time)
 
 on:
   schedule:
-    # Every 4 hours (00,04,08,12,16,20 UTC) — evenly divides the day. Steady-state
-    # runs are ~5 min against a 60-min timeout, so a run never overlaps the next.
-    - cron: '0 */4 * * *'
+    # 04:00 and 16:00 UK local time (Europe/London), DST-aware. GitHub cron is
+    # UTC-only and cannot follow the BST/GMT switch, so we fire at both candidate
+    # UTC hours and let the `gate` job below keep only the firings that are 04:00
+    # or 16:00 in London. 04:00 UK == 04:00 UTC (GMT) or 03:00 UTC (BST); 16:00 UK
+    # == 16:00 UTC (GMT) or 15:00 UTC (BST). Net effect: exactly two ingests a day
+    # at 04:00 and 16:00 London time, which keeps Actions minutes well within the
+    # free private-repo budget.
+    - cron: '0 3,4,15,16 * * *'
   workflow_dispatch: {}
 
 jobs:
+  # Cheap timezone gate (~seconds, ~1 billed minute). Runs on every firing and
+  # decides whether the real ingest should proceed, so the two off-DST firings a
+  # day are skipped (a skipped job costs no minutes). Manual runs always proceed.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != "schedule" ]; then
+            echo "Manual run ($EVENT): proceeding."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          H=$(TZ='Europe/London' date +%H)
+          if [ "$H" = "04" ] || [ "$H" = "16" ]; then
+            echo "London local hour is $H: proceeding."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "London local hour is $H (not 04 or 16): skipping this firing."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   ingest:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     # A first-time pull from a bulk source (e.g. HIBP's ~800 breaches, or a
     # raised California OAG cap) runs every newly exposed record through
