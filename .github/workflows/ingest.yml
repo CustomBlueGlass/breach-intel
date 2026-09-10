@@ -1,10 +1,11 @@
-name: Ingest breach sources (every 4 hours)
+name: Ingest breach sources (every 12 hours)
 
 on:
   schedule:
-    # Every 4 hours (00,04,08,12,16,20 UTC) — evenly divides the day. Steady-state
-    # runs are ~5 min against a 60-min timeout, so a run never overlaps the next.
-    - cron: '0 */4 * * *'
+    # 04:00 and 16:00 UTC (GMT): 04:00, then every 12 hours. Keeps GitHub Actions
+    # minutes well within the free private-repo budget. Runs are ~10-16 min
+    # against a 60-min timeout, so a run never overlaps the next.
+    - cron: '0 4,16 * * *'
   workflow_dispatch: {}
 
 jobs:
